@@ -130,6 +130,8 @@ cdef class BitfinexActiveOrderTracker:
         self._active_asks.clear()
         for snapshot_orders, active_orders in [(message.content.get("bids", 0), self._active_bids),
                                                (message.content.get("asks", 0), self._active_asks)]:
+            if not isinstance(snapshot_orders, list):
+                snapshot_orders = [snapshot_orders]
             for order in snapshot_orders:
                 price = Decimal(order[0])
                 order_id = order[2]
