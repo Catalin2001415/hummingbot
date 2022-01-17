@@ -54,6 +54,9 @@ cdef class ArbitrageStrategy(StrategyBase):
                     use_oracle_conversion_rate: bool = False,
                     secondary_to_primary_base_conversion_rate: Decimal = Decimal("1"),
                     secondary_to_primary_quote_conversion_rate: Decimal = Decimal("1"),
+                    order_size_constraints_enabled: bool = False,
+                    min_order_size: Decimal = Decimal("0")
+                    max_order_size: Decimal = Decimal("0")
                     hb_app_notification: bool = False):
         """
         :param market_pairs: list of arbitrage market pairs
@@ -85,6 +88,9 @@ cdef class ArbitrageStrategy(StrategyBase):
         self._use_oracle_conversion_rate = use_oracle_conversion_rate
         self._secondary_to_primary_base_conversion_rate = secondary_to_primary_base_conversion_rate
         self._secondary_to_primary_quote_conversion_rate = secondary_to_primary_quote_conversion_rate
+        self._order_size_constraints_enabled = order_size_constraints_enabled
+        self._min_order_size = min_order_size
+        self._max_order_size = max_order_size
         self._last_conv_rates_logged = 0
 
         self._hb_app_notification = hb_app_notification
@@ -566,6 +572,13 @@ cdef class ArbitrageStrategy(StrategyBase):
                 self.log_with_clock(logging.DEBUG, f"Total profitability with fees: {profitability}, "
                                                    f"Current step profitability: {bid_price/ask_price},"
                                                    f"bid, ask price, amount: {bid_price, ask_price, amount}")
+
+           # if strategy has constrained order sizes, apply order size constraints
+           # update best_profitable_order_amount
+           if self._order_size_constraints_enabled:
+               best_profitable_order_amount = self.c_apply_order_size_constraints(best_profitable_order_amount)
+               best_profitable_order_profitability = profitability
+
             buy_market_quote_balance = buy_market.c_get_available_balance(buy_market_trading_pair_tuple.quote_asset)
             sell_market_base_balance = sell_market.c_get_available_balance(sell_market_trading_pair_tuple.base_asset)
             # stop current step if buy/sell market does not have enough asset
@@ -617,6 +630,20 @@ cdef class ArbitrageStrategy(StrategyBase):
     def ready_for_new_orders(self, market_pair):
         return self.c_ready_for_new_orders(market_pair)
     # ---------------------------------------------------------------
+
+
+cdef object c_apply_order_size_constraints(object best_profitable_order_amount):
+    """
+    applies order size constraints if order_size_constraints_enabled is set to True
+
+    :param best_profitable_order_amount: Best profitable order amount as calculated by c_find_best_profitable_amount
+    :return: updated best_profitable_order_amount as per order size constraints (min_order_size, max_order_size)
+    """
+
+    best_profitable_order_amount = max(best_profitable_order_amount, self._min_order_size)
+    best_profitable_order_amount = min(best_profitable_order_amount, self._min_order_size)
+
+    return best_profitable_order_amount
 
 
 cdef list c_find_profitable_arbitrage_orders(object min_profitability,

@@ -130,4 +130,28 @@ arbitrage_config_map = {
         validator=lambda v: validate_decimal(v, Decimal(0), inclusive=False),
         type_str="decimal",
     ),
+    "order_size_constraints_enabled": ConfigVar(
+        key="order_size_constraints_enabled",
+        type_str="bool",
+        prompt="Do you want to limit the sizes of orders to be placed? (Yes/No) >>> ",
+        prompt_on_new=True,
+        default=False,
+        validator=lambda v: validate_bool(v),
+    ),
+    "min_order_size": ConfigVar(
+        key="min_order_size",
+        required_if=lambda: arbitrage_config_map.get("order_size_constraints_enabled").value,
+        prompt="What is the minimum size of the Base asset to be used while placing orders? >>> ",
+        type_str="decimal",
+        default=Decimal("0"),
+        validator=lambda v: validate_decimal(v, min_value=Decimal("0"), inclusive=True),
+    ),
+    "max_order_size": ConfigVar(
+        key="max_order_size",
+        required_if=lambda: arbitrage_config_map.get("order_size_constraints_enabled").value,
+        prompt="What is the maximum size of the Base asset to be used while placing orders? >>> ",
+        type_str="decimal",
+        default=Decimal("0"),
+        validator=lambda v: validate_decimal(v, min_value=Decimal("0"), inclusive=True),
+    ),
 }

@@ -18,6 +18,9 @@ def start(self):
     use_oracle_conversion_rate = arbitrage_config_map.get("use_oracle_conversion_rate").value
     secondary_to_primary_base_conversion_rate = arbitrage_config_map["secondary_to_primary_base_conversion_rate"].value
     secondary_to_primary_quote_conversion_rate = arbitrage_config_map["secondary_to_primary_quote_conversion_rate"].value
+    order_size_constraints_enabled = arbitrage_config_map.get("order_size_constraints_enabled").value
+    min_order_size = arbitrage_config_map.get("min_order_size").value
+    max_order_size = arbitrage_config_map.get("max_order_size").value
 
     try:
         primary_trading_pair: str = raw_primary_trading_pair
@@ -44,4 +47,7 @@ def start(self):
                               use_oracle_conversion_rate=use_oracle_conversion_rate,
                               secondary_to_primary_base_conversion_rate=secondary_to_primary_base_conversion_rate,
                               secondary_to_primary_quote_conversion_rate=secondary_to_primary_quote_conversion_rate,
+                              order_size_constraints_enabled=order_size_constraints_enabled,
+                              min_order_size=min_order_size,
+                              max_order_size=max_order_size,
                               hb_app_notification=True)

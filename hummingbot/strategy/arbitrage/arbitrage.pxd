@@ -11,8 +11,6 @@ cdef class ArbitrageStrategy(StrategyBase):
         bint _all_markets_ready
         dict _order_id_to_market
         object _min_profitability
-        object _max_order_size
-        object _min_order_size
         double _status_report_interval
         double _last_timestamp
         dict _last_trade_timestamps
@@ -26,6 +24,9 @@ cdef class ArbitrageStrategy(StrategyBase):
         bint _use_oracle_conversion_rate
         object _secondary_to_primary_base_conversion_rate
         object _secondary_to_primary_quote_conversion_rate
+        bint _order_size_constraints_enabled
+        object _min_order_size
+        object _max_order_size
         bint _hb_app_notification
         tuple _current_profitability
         double _last_conv_rates_logged
