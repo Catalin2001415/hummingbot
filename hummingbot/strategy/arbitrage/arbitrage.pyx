@@ -55,8 +55,8 @@ cdef class ArbitrageStrategy(StrategyBase):
                     secondary_to_primary_base_conversion_rate: Decimal = Decimal("1"),
                     secondary_to_primary_quote_conversion_rate: Decimal = Decimal("1"),
                     order_size_constraints_enabled: bool = False,
-                    min_order_size: Decimal = Decimal("0")
-                    max_order_size: Decimal = Decimal("0")
+                    min_order_size: Decimal = Decimal("0"),
+                    max_order_size: Decimal = Decimal("0"),
                     hb_app_notification: bool = False):
         """
         :param market_pairs: list of arbitrage market pairs
@@ -573,11 +573,11 @@ cdef class ArbitrageStrategy(StrategyBase):
                                                    f"Current step profitability: {bid_price/ask_price},"
                                                    f"bid, ask price, amount: {bid_price, ask_price, amount}")
 
-           # if strategy has constrained order sizes, apply order size constraints
-           # update best_profitable_order_amount
-           if self._order_size_constraints_enabled:
-               best_profitable_order_amount = self.c_apply_order_size_constraints(best_profitable_order_amount)
-               best_profitable_order_profitability = profitability
+            # if strategy has constrained order sizes, apply order size constraints
+            # update best_profitable_order_amount
+            if self._order_size_constraints_enabled:
+                best_profitable_order_amount = self.c_apply_order_size_constraints(best_profitable_order_amount)
+                best_profitable_order_profitability = profitability
 
             buy_market_quote_balance = buy_market.c_get_available_balance(buy_market_trading_pair_tuple.quote_asset)
             sell_market_base_balance = sell_market.c_get_available_balance(sell_market_trading_pair_tuple.base_asset)
@@ -632,7 +632,7 @@ cdef class ArbitrageStrategy(StrategyBase):
     # ---------------------------------------------------------------
 
 
-cdef object c_apply_order_size_constraints(object best_profitable_order_amount):
+cdef object c_apply_order_size_constraints(self, object best_profitable_order_amount):
     """
     applies order size constraints if order_size_constraints_enabled is set to True
 
