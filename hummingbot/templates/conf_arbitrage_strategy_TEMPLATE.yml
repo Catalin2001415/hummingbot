@@ -32,5 +32,10 @@ secondary_to_primary_base_conversion_rate: null
 # the conversion rate is 0.8 (1 / 1.25)
 secondary_to_primary_quote_conversion_rate: null
 
+# Parameters to constarint order sizes
+order_size_constraints_enabled: null
+min_order_size: null
+max_order_size: null
+
 # For more detailed information, see:
 # https://docs.hummingbot.io/strategies/arbitrage/#configuration-parameters
