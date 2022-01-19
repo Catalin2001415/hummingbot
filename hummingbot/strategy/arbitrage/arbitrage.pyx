@@ -632,18 +632,18 @@ cdef class ArbitrageStrategy(StrategyBase):
     # ---------------------------------------------------------------
 
 
-cdef object c_apply_order_size_constraints(self, object best_profitable_order_amount):
-    """
-    applies order size constraints if order_size_constraints_enabled is set to True
+    cdef object c_apply_order_size_constraints(self, object best_profitable_order_amount):
+        """
+        applies order size constraints if order_size_constraints_enabled is set to True
 
-    :param best_profitable_order_amount: Best profitable order amount as calculated by c_find_best_profitable_amount
-    :return: updated best_profitable_order_amount as per order size constraints (min_order_size, max_order_size)
-    """
+        :param best_profitable_order_amount: Best profitable order amount as calculated by c_find_best_profitable_amount
+        :return: updated best_profitable_order_amount as per order size constraints (min_order_size, max_order_size)
+        """
 
-    best_profitable_order_amount = max(best_profitable_order_amount, self._min_order_size)
-    best_profitable_order_amount = min(best_profitable_order_amount, self._min_order_size)
+        best_profitable_order_amount = max(best_profitable_order_amount, self._min_order_size)
+        best_profitable_order_amount = min(best_profitable_order_amount, self._min_order_size)
 
-    return best_profitable_order_amount
+        return best_profitable_order_amount
 
 
 cdef list c_find_profitable_arbitrage_orders(object min_profitability,
