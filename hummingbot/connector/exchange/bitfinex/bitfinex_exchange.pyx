@@ -654,7 +654,7 @@ cdef class BitfinexExchange(ExchangeBase):
                 if isSuccess:
                     return True
                 else:
-                    raise IOError(f"Couldn't place order {order_id}")
+                    raise IOError(f"Couldn't place order {order_id} msg: {msg}")
 
             return False
 
