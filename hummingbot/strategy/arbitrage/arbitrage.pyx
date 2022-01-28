@@ -428,6 +428,12 @@ cdef class ArbitrageStrategy(StrategyBase):
         best_amount, best_profitability, sell_price, buy_price = self.c_find_best_profitable_amount(
             buy_market_trading_pair_tuple, sell_market_trading_pair_tuple
         )
+
+        # if strategy has constrained order sizes enabled, apply order size constraints
+        # update best_amount
+        if self._order_size_constraints_enabled:
+            best_amount = self.c_apply_order_size_constraints(best_amount)
+
         quantized_buy_amount = buy_market.c_quantize_order_amount(buy_market_trading_pair_tuple.trading_pair, Decimal(best_amount))
         quantized_sell_amount = sell_market.c_quantize_order_amount(sell_market_trading_pair_tuple.trading_pair, Decimal(best_amount))
         quantized_order_amount = min(quantized_buy_amount, quantized_sell_amount)
@@ -573,11 +579,6 @@ cdef class ArbitrageStrategy(StrategyBase):
                                                    f"Current step profitability: {bid_price/ask_price},"
                                                    f"bid, ask price, amount: {bid_price, ask_price, amount}")
 
-            # if strategy has constrained order sizes, apply order size constraints
-            # update best_profitable_order_amount
-            if self._order_size_constraints_enabled:
-                best_profitable_order_amount = self.c_apply_order_size_constraints(best_profitable_order_amount)
-                best_profitable_order_profitability = profitability
 
             buy_market_quote_balance = buy_market.c_get_available_balance(buy_market_trading_pair_tuple.quote_asset)
             sell_market_base_balance = sell_market.c_get_available_balance(sell_market_trading_pair_tuple.base_asset)
@@ -641,7 +642,7 @@ cdef class ArbitrageStrategy(StrategyBase):
         """
 
         best_profitable_order_amount = max(best_profitable_order_amount, self._min_order_size)
-        best_profitable_order_amount = min(best_profitable_order_amount, self._min_order_size)
+        best_profitable_order_amount = min(best_profitable_order_amount, self._max_order_size)
 
         return best_profitable_order_amount
 
