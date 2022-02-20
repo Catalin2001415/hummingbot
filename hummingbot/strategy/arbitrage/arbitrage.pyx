@@ -47,6 +47,7 @@ cdef class ArbitrageStrategy(StrategyBase):
     def init_params(self,
                     market_pairs: List[ArbitrageMarketPair],
                     min_profitability: Decimal,
+                    max_order_size: Decimal,
                     logging_options: int = OPTION_LOG_ORDER_COMPLETED,
                     status_report_interval: float = 60.0,
                     next_trade_delay_interval: float = 5.0,
@@ -56,7 +57,6 @@ cdef class ArbitrageStrategy(StrategyBase):
                     secondary_to_primary_quote_conversion_rate: Decimal = Decimal("1"),
                     order_size_constraints_enabled: bool = False,
                     min_order_size: Decimal = Decimal("0"),
-                    max_order_size: Decimal = Decimal("0"),
                     allowed_active_orders_per_market: int = 0,
                     hb_app_notification: bool = False):
         """

@@ -141,7 +141,7 @@ arbitrage_config_map = {
     "min_order_size": ConfigVar(
         key="min_order_size",
         prompt="What is the minimum size of the Base asset to be used while placing orders? >>> ",
-        required_if=lambda: arbitrage_config_map.get("order_size_constraints_enabled").value,
+        prompt_on_new=True,
         type_str="decimal",
         default=Decimal("0"),
         validator=lambda v: validate_decimal(v, min_value=Decimal("0"), inclusive=True),
@@ -149,9 +149,8 @@ arbitrage_config_map = {
     "max_order_size": ConfigVar(
         key="max_order_size",
         prompt="What is the maximum size of the Base asset to be used while placing orders? >>> ",
-        required_if=lambda: arbitrage_config_map.get("order_size_constraints_enabled").value,
+        prompt_on_new=True,
         type_str="decimal",
-        default=Decimal("0"),
         validator=lambda v: validate_decimal(v, min_value=Decimal("0"), inclusive=True),
     ),
     "allowed_active_orders_per_market": ConfigVar(

@@ -36,6 +36,7 @@ secondary_to_primary_quote_conversion_rate: null
 order_size_constraints_enabled: null
 min_order_size: null
 max_order_size: null
+allowed_active_orders_per_market: null
 
 # For more detailed information, see:
 # https://docs.hummingbot.io/strategies/arbitrage/#configuration-parameters
