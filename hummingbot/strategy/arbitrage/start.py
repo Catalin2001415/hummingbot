@@ -21,6 +21,7 @@ def start(self):
     order_size_constraints_enabled = arbitrage_config_map.get("order_size_constraints_enabled").value
     min_order_size = arbitrage_config_map.get("min_order_size").value
     max_order_size = arbitrage_config_map.get("max_order_size").value
+    allowed_active_orders_per_market = arbitrage_config_map.get("allowed_active_orders_per_market").value
 
     try:
         primary_trading_pair: str = raw_primary_trading_pair
@@ -50,4 +51,5 @@ def start(self):
                               order_size_constraints_enabled=order_size_constraints_enabled,
                               min_order_size=min_order_size,
                               max_order_size=max_order_size,
+                              allowed_active_orders_per_market=allowed_active_orders_per_market,
                               hb_app_notification=True)

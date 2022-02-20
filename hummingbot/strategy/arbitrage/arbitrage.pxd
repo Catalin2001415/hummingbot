@@ -27,6 +27,7 @@ cdef class ArbitrageStrategy(StrategyBase):
         bint _order_size_constraints_enabled
         object _min_order_size
         object _max_order_size
+        int _allowed_active_orders_per_market
         bint _hb_app_notification
         tuple _current_profitability
         double _last_conv_rates_logged

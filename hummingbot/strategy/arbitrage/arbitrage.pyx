@@ -57,6 +57,7 @@ cdef class ArbitrageStrategy(StrategyBase):
                     order_size_constraints_enabled: bool = False,
                     min_order_size: Decimal = Decimal("0"),
                     max_order_size: Decimal = Decimal("0"),
+                    allowed_active_orders_per_market: int = 0
                     hb_app_notification: bool = False):
         """
         :param market_pairs: list of arbitrage market pairs
@@ -91,6 +92,7 @@ cdef class ArbitrageStrategy(StrategyBase):
         self._order_size_constraints_enabled = order_size_constraints_enabled
         self._min_order_size = min_order_size
         self._max_order_size = max_order_size
+        self._allowed_active_orders_per_market = allowed_active_orders_per_market
         self._last_conv_rates_logged = 0
 
         self._hb_app_notification = hb_app_notification
@@ -358,11 +360,18 @@ cdef class ArbitrageStrategy(StrategyBase):
         cdef:
             double time_left
             dict tracked_taker_orders = {**self._sb_order_tracker.c_get_limit_orders(), ** self._sb_order_tracker.c_get_market_orders()}
+            dict market_pair_to_orders = self._sb_order_tracker.market_pair_to_active_orders()
 
         for market_trading_pair_tuple in market_trading_pair_tuples:
             # Do not continue if there are pending limit order
             # if len(tracked_taker_orders.get(market_trading_pair_tuple, {})) > 0:
             #     return False
+
+            # Do not continue if there's more than allowed_active_orders_per_market on either market (-1 indicates infinte)
+            if not (self._allowed_active_orders_per_market == -1):
+                if len(market_pair_to_orders.get(market_trading_pair_tuple, {})) > self._allowed_active_orders_per_market:
+                    return False
+
             # Wait for the cool off interval before the next trade, so wallet balance is up to date
             ready_to_trade_time = self._last_trade_timestamps.get(market_trading_pair_tuple, 0) + self._next_trade_delay
             if market_trading_pair_tuple in self._last_trade_timestamps and ready_to_trade_time > self._current_timestamp:

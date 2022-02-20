@@ -5,7 +5,8 @@ from hummingbot.client.config.config_validators import (
     validate_exchange,
     validate_market_trading_pair,
     validate_decimal,
-    validate_bool
+    validate_bool,
+    validate_int
 )
 from hummingbot.client.config.config_helpers import parse_cvar_value
 from hummingbot.client.settings import AllConnectorSettings, required_exchanges
@@ -135,23 +136,29 @@ arbitrage_config_map = {
         type_str="bool",
         prompt="Do you want to limit the sizes of orders to be placed? (Yes/No) >>> ",
         prompt_on_new=True,
-        default=False,
         validator=lambda v: validate_bool(v),
     ),
     "min_order_size": ConfigVar(
         key="min_order_size",
-        required_if=lambda: arbitrage_config_map.get("order_size_constraints_enabled").value,
         prompt="What is the minimum size of the Base asset to be used while placing orders? >>> ",
+        required_if=lambda: arbitrage_config_map.get("order_size_constraints_enabled").value,
         type_str="decimal",
         default=Decimal("0"),
         validator=lambda v: validate_decimal(v, min_value=Decimal("0"), inclusive=True),
     ),
     "max_order_size": ConfigVar(
         key="max_order_size",
-        required_if=lambda: arbitrage_config_map.get("order_size_constraints_enabled").value,
         prompt="What is the maximum size of the Base asset to be used while placing orders? >>> ",
+        required_if=lambda: arbitrage_config_map.get("order_size_constraints_enabled").value,
         type_str="decimal",
         default=Decimal("0"),
         validator=lambda v: validate_decimal(v, min_value=Decimal("0"), inclusive=True),
     ),
+    "allowed_active_orders_per_market": ConfigVar(
+        key="allowed_active_orders_per_market",
+        prompt="What are the maximum number of active orders you want to allow on either market?(-1 indicates infinite) >>> ",
+        type_str="int",
+        prompt_on_new=True,
+        validator=lambda v: validate_int(v, min_value=-1, inclusive=True),
+        default=0),
 }
