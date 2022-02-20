@@ -57,7 +57,7 @@ cdef class ArbitrageStrategy(StrategyBase):
                     order_size_constraints_enabled: bool = False,
                     min_order_size: Decimal = Decimal("0"),
                     max_order_size: Decimal = Decimal("0"),
-                    allowed_active_orders_per_market: int = 0
+                    allowed_active_orders_per_market: int = 0,
                     hb_app_notification: bool = False):
         """
         :param market_pairs: list of arbitrage market pairs
