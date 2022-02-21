@@ -360,16 +360,11 @@ cdef class ArbitrageStrategy(StrategyBase):
         cdef:
             double time_left
             dict tracked_taker_orders = {**self._sb_order_tracker.c_get_limit_orders(), ** self._sb_order_tracker.c_get_market_orders()}
-            dict market_pair_to_orders = self._sb_order_tracker.market_pair_to_active_orders
 
         for market_trading_pair_tuple in market_trading_pair_tuples:
-            # Do not continue if there are pending limit order
-            # if len(tracked_taker_orders.get(market_trading_pair_tuple, {})) > 0:
-            #     return False
-
-            # Do not continue if there's more than allowed_active_orders_per_market on either market (-1 indicates infinte)
+            # Do not continue if there's more than allowed_active_orders_per_market pending limit orders on either market (-1 indicates infinte)
             if not (self._allowed_active_orders_per_market == -1):
-                if len(market_pair_to_orders.get(market_trading_pair_tuple, {})) > self._allowed_active_orders_per_market:
+                if len(tracked_taker_orders.get(market_trading_pair_tuple, {})) > self._allowed_active_orders_per_market:
                     return False
 
             # Wait for the cool off interval before the next trade, so wallet balance is up to date
