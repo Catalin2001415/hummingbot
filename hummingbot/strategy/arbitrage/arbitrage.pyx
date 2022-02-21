@@ -360,7 +360,7 @@ cdef class ArbitrageStrategy(StrategyBase):
         cdef:
             double time_left
             dict tracked_taker_orders = {**self._sb_order_tracker.c_get_limit_orders(), ** self._sb_order_tracker.c_get_market_orders()}
-            dict market_pair_to_orders = self._sb_order_tracker.market_pair_to_active_orders()
+            dict market_pair_to_orders = self._sb_order_tracker.market_pair_to_active_orders
 
         for market_trading_pair_tuple in market_trading_pair_tuples:
             # Do not continue if there are pending limit order
