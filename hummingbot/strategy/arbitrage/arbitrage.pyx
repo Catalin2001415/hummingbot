@@ -230,7 +230,8 @@ cdef class ArbitrageStrategy(StrategyBase):
             warning_lines.extend(self.balance_warning([market_pair.first, market_pair.second]))
 
         if len(warning_lines) > 0:
-            lines.extend(["", "  *** WARNINGS ***"] + warning_lines)
+            # lines.extend(["", "  *** WARNINGS ***"] + warning_lines)
+            pass
 
         return "\n".join(lines)
 
@@ -290,11 +291,12 @@ cdef class ArbitrageStrategy(StrategyBase):
             object buy_order = buy_order_completed_event
             object market_trading_pair_tuple = self._sb_order_tracker.c_get_market_pair_from_order_id(buy_order.order_id)
         if market_trading_pair_tuple is not None:
+            buy_price = self._sb_order_tracker.c_get_limit_order(market_trading_pair_tuple, buy_order.order_id).get("price", {})
             self._last_trade_timestamps[market_trading_pair_tuple] = self._current_timestamp
             if self._logging_options & self.OPTION_LOG_ORDER_COMPLETED:
                 self.log_with_clock(logging.INFO,
                                     f"Limit order completed on {market_trading_pair_tuple[0].name}: {buy_order.order_id}")
-                self.notify_hb_app_with_timestamp(f"{buy_order.base_asset_amount:.8f} {buy_order.base_asset}-{buy_order.quote_asset} buy limit order completed on {market_trading_pair_tuple[0].name}")
+                self.notify_hb_app_with_timestamp(f"buy limit order with (price: {buy_price}, amount: {buy_order.base_asset_amount:.8f}) {buy_order.base_asset}-{buy_order.quote_asset} completed on {market_trading_pair_tuple[0].name}")
 
     cdef c_did_complete_sell_order(self, object sell_order_completed_event):
         """
@@ -306,11 +308,12 @@ cdef class ArbitrageStrategy(StrategyBase):
             object sell_order = sell_order_completed_event
             object market_trading_pair_tuple = self._sb_order_tracker.c_get_market_pair_from_order_id(sell_order.order_id)
         if market_trading_pair_tuple is not None:
+            sell_price = self._sb_order_tracker.c_get_limit_order(market_trading_pair_tuple, sell_order.order_id).get("price", {})
             self._last_trade_timestamps[market_trading_pair_tuple] = self._current_timestamp
             if self._logging_options & self.OPTION_LOG_ORDER_COMPLETED:
                 self.log_with_clock(logging.INFO,
                                     f"Limit order completed on {market_trading_pair_tuple[0].name}: {sell_order.order_id}")
-                self.notify_hb_app_with_timestamp(f"{sell_order.base_asset_amount:.8f} {sell_order.base_asset}-{sell_order.quote_asset} sell limit order completed on {market_trading_pair_tuple[0].name}")
+                self.notify_hb_app_with_timestamp(f"sell limit order with (price: {sell_price}, amount: {sell_order.base_asset_amount:.8f}) {sell_order.base_asset}-{sell_order.quote_asset} completed on {market_trading_pair_tuple[0].name}")
 
     cdef c_did_cancel_order(self, object cancel_event):
         """
@@ -441,8 +444,8 @@ cdef class ArbitrageStrategy(StrategyBase):
             best_amount = self.c_apply_order_size_constraints(best_amount)
 
         # adjust buy/sell order prices with price_adjust_spread
-        sell_price = sell_price * (Decimal("1") + self._price_adjust_spread)
-        buy_price = buy_price * (Decimal("1") - self._price_adjust_spread)
+        sell_price_adjusted_with_spread = sell_price * (Decimal("1") + self._price_adjust_spread)
+        buy_price_adjusted_with_spread = buy_price * (Decimal("1") - self._price_adjust_spread)
 
         quantized_buy_amount = buy_market.c_quantize_order_amount(buy_market_trading_pair_tuple.trading_pair, Decimal(best_amount))
         quantized_sell_amount = sell_market.c_quantize_order_amount(sell_market_trading_pair_tuple.trading_pair, Decimal(best_amount))
@@ -463,9 +466,9 @@ cdef class ArbitrageStrategy(StrategyBase):
 
             # Set limit order expiration_seconds to _next_trade_delay for connectors that require order expiration for limit orders
             self.c_buy_with_specific_market(buy_market_trading_pair_tuple, quantized_order_amount,
-                                            order_type=buy_order_type, price=buy_price, expiration_seconds=self._next_trade_delay)
+                                            order_type=buy_order_type, price=buy_price_adjusted_with_spread, expiration_seconds=self._next_trade_delay)
             self.c_sell_with_specific_market(sell_market_trading_pair_tuple, quantized_order_amount,
-                                             order_type=sell_order_type, price=sell_price, expiration_seconds=self._next_trade_delay)
+                                             order_type=sell_order_type, price=sell_price_adjusted_with_spread, expiration_seconds=self._next_trade_delay)
             self.logger().info(self.format_status())
 
     @staticmethod

@@ -86,7 +86,7 @@ class StartCommand:
 
         self._initialize_notifiers()
 
-        self._notify(f"\nStatus check complete. Starting '{self.strategy_name}' strategy...")
+        # self._notify(f"\nStatus check complete. Starting '{self.strategy_name}' strategy...")
         if any([str(exchange).endswith("paper_trade") for exchange in settings.required_exchanges]):
             self._notify("\nPaper Trading Active: All orders are simulated, and no real orders are placed.")
 
@@ -97,13 +97,15 @@ class StartCommand:
             # Display custom warning message for specific connectors
             warning_msg = warning_messages.get(connector, None)
             if warning_msg is not None:
-                self._notify(f"\nConnector status: {status}\n"
-                             f"{warning_msg}")
+                # self._notify(f"\nConnector status: {status}\n"
+                #              f"{warning_msg}")
+                pass
 
             # Display warning message if the exchange connector has outstanding issues or not working
             elif status != "GREEN":
-                self._notify(f"\nConnector status: {status}. This connector has one or more issues.\n"
-                             "Refer to our Github page for more info: https://github.com/coinalpha/hummingbot")
+                # self._notify(f"\nConnector status: {status}. This connector has one or more issues.\n"
+                #              "Refer to our Github page for more info: https://github.com/coinalpha/hummingbot")
+                pass
 
         await self.start_market_making(self.strategy_name, restore)
 
