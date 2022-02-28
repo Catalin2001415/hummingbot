@@ -57,7 +57,7 @@ cdef class ArbitrageStrategy(StrategyBase):
                     secondary_to_primary_quote_conversion_rate: Decimal = Decimal("1"),
                     order_size_constraints_enabled: bool = False,
                     min_order_size: Decimal = Decimal("0"),
-                    allowed_active_orders_per_market: int = 0,
+                    allowed_active_orders_per_market: int = 1,
                     price_adjust_spread: Decimal = Decimal("0"),
                     hb_app_notification: bool = False):
         """
@@ -366,7 +366,7 @@ cdef class ArbitrageStrategy(StrategyBase):
         for market_trading_pair_tuple in market_trading_pair_tuples:
             # Do not continue if there's more than allowed_active_orders_per_market pending limit orders on either market (-1 indicates infinte)
             if not (self._allowed_active_orders_per_market == -1):
-                if len(tracked_taker_orders.get(market_trading_pair_tuple, {})) > self._allowed_active_orders_per_market:
+                if len(tracked_taker_orders.get(market_trading_pair_tuple, {})) >= self._allowed_active_orders_per_market:
                     return False
 
             # Wait for the cool off interval before the next trade, so wallet balance is up to date

@@ -143,8 +143,8 @@ arbitrage_config_map = {
         prompt="What is the minimum size of the Base asset to be used while placing orders? >>> ",
         prompt_on_new=True,
         type_str="decimal",
-        default=Decimal("0"),
         validator=lambda v: validate_decimal(v, min_value=Decimal("0"), inclusive=True),
+        default=Decimal("0"),
     ),
     "max_order_size": ConfigVar(
         key="max_order_size",
@@ -159,15 +159,15 @@ arbitrage_config_map = {
         type_str="int",
         prompt_on_new=True,
         validator=lambda v: validate_int(v, min_value=-1, inclusive=True),
-        default=0,
+        default=1,
     ),
     "price_adjust_spread": ConfigVar(
         key="price_adjust_spread",
         prompt="How far away from the arbitrage buy/sell price do you want to place the "
              "orders? (Enter 1 to indicate 1%) >>> ",
         type_str="decimal",
+        prompt_on_new=True,
         validator=lambda v: validate_decimal(v, 0, 100, inclusive=True),
         default=Decimal("0"),
-        prompt_on_new=True,
     ),
 }
