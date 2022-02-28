@@ -159,5 +159,15 @@ arbitrage_config_map = {
         type_str="int",
         prompt_on_new=True,
         validator=lambda v: validate_int(v, min_value=-1, inclusive=True),
-        default=0),
+        default=0,
+    ),
+    "price_adjust_spread": ConfigVar(
+        key="price_adjust_spread",
+        prompt="How far away from the arbitrage buy/sell price do you want to place the "
+             "orders? (Enter 1 to indicate 1%) >>> ",
+        type_str="decimal",
+        validator=lambda v: validate_decimal(v, 0, 100, inclusive=True),
+        default=Decimal("0"),
+        prompt_on_new=True,
+    ),
 }

@@ -22,6 +22,7 @@ def start(self):
     min_order_size = arbitrage_config_map.get("min_order_size").value
     max_order_size = arbitrage_config_map.get("max_order_size").value
     allowed_active_orders_per_market = arbitrage_config_map.get("allowed_active_orders_per_market").value
+    price_adjust_spread = arbitrage_config_map.get("price_adjust_spread").value
 
     try:
         primary_trading_pair: str = raw_primary_trading_pair
@@ -52,4 +53,5 @@ def start(self):
                               min_order_size=min_order_size,
                               max_order_size=max_order_size,
                               allowed_active_orders_per_market=allowed_active_orders_per_market,
+                              price_adjust_spread=price_adjust_spread,
                               hb_app_notification=True)

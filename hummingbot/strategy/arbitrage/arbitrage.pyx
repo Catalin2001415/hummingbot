@@ -58,6 +58,7 @@ cdef class ArbitrageStrategy(StrategyBase):
                     order_size_constraints_enabled: bool = False,
                     min_order_size: Decimal = Decimal("0"),
                     allowed_active_orders_per_market: int = 0,
+                    price_adjust_spread: Decimal = Decimal("0"),
                     hb_app_notification: bool = False):
         """
         :param market_pairs: list of arbitrage market pairs
@@ -93,6 +94,7 @@ cdef class ArbitrageStrategy(StrategyBase):
         self._min_order_size = min_order_size
         self._max_order_size = max_order_size
         self._allowed_active_orders_per_market = allowed_active_orders_per_market
+        self._price_adjust_spread = price_adjust_spread
         self._last_conv_rates_logged = 0
 
         self._hb_app_notification = hb_app_notification
@@ -437,6 +439,10 @@ cdef class ArbitrageStrategy(StrategyBase):
         # update best_amount
         if self._order_size_constraints_enabled:
             best_amount = self.c_apply_order_size_constraints(best_amount)
+
+        # adjust buy/sell order prices with price_adjust_spread
+        sell_price = sell_price * (Decimal("1") + self._price_adjust_spread)
+        buy_price = buy_price * (Decimal("1") - self._price_adjust_spread)
 
         quantized_buy_amount = buy_market.c_quantize_order_amount(buy_market_trading_pair_tuple.trading_pair, Decimal(best_amount))
         quantized_sell_amount = sell_market.c_quantize_order_amount(sell_market_trading_pair_tuple.trading_pair, Decimal(best_amount))
