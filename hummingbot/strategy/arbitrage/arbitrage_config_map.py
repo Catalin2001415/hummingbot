@@ -130,4 +130,15 @@ arbitrage_config_map = {
         validator=lambda v: validate_decimal(v, Decimal(0), inclusive=False),
         type_str="decimal",
     ),
+    "one_way_mode": ConfigVar(
+        key="one_way_mode",
+        prompt="Enter the direction of arbitrage trade you want to allow, e.g, "
+                "0: Allow both directions (default)"
+                "1: Allow buying on primary market and selling on secondary market"
+                "2: Allow selling on primary market and buying on secondary market"
+        prompt_on_new=True,
+        type_str="int",
+        validator=lambda v: validate_int(v, min_value=0, max_value=2, inclusive=True),
+        default=0,
+     ),
 }

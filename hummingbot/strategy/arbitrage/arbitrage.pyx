@@ -51,6 +51,7 @@ cdef class ArbitrageStrategy(StrategyBase):
                     use_oracle_conversion_rate: bool = False,
                     secondary_to_primary_base_conversion_rate: Decimal = Decimal("1"),
                     secondary_to_primary_quote_conversion_rate: Decimal = Decimal("1"),
+                    one_way_mode: int = 0,
                     hb_app_notification: bool = False):
         """
         :param market_pairs: list of arbitrage market pairs
@@ -82,6 +83,7 @@ cdef class ArbitrageStrategy(StrategyBase):
         self._use_oracle_conversion_rate = use_oracle_conversion_rate
         self._secondary_to_primary_base_conversion_rate = secondary_to_primary_base_conversion_rate
         self._secondary_to_primary_quote_conversion_rate = secondary_to_primary_quote_conversion_rate
+        self._one_way_mode = one_way_mode
         self._last_conv_rates_logged = 0
 
         self._hb_app_notification = hb_app_notification
@@ -396,9 +398,11 @@ cdef class ArbitrageStrategy(StrategyBase):
 
         if self._current_profitability[1] > self._current_profitability[0]:
             # it is more profitable to buy on market_1 and sell on market_2
-            self.c_process_market_pair_inner(market_pair.first, market_pair.second)
+            if self._one_way_mode == 1:
+                self.c_process_market_pair_inner(market_pair.first, market_pair.second)
         else:
-            self.c_process_market_pair_inner(market_pair.second, market_pair.first)
+            if self._one_way_mode == 2:
+                self.c_process_market_pair_inner(market_pair.second, market_pair.first)
 
     cdef c_process_market_pair_inner(self, object buy_market_trading_pair_tuple, object sell_market_trading_pair_tuple):
         """

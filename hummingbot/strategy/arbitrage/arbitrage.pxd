@@ -29,6 +29,7 @@ cdef class ArbitrageStrategy(StrategyBase):
         bint _hb_app_notification
         tuple _current_profitability
         double _last_conv_rates_logged
+        int _one_way_mode
 
     cdef tuple c_calculate_arbitrage_top_order_profitability(self, object market_pair)
     cdef c_process_market_pair(self, object market_pair)

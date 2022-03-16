@@ -18,6 +18,7 @@ def start(self):
     use_oracle_conversion_rate = arbitrage_config_map.get("use_oracle_conversion_rate").value
     secondary_to_primary_base_conversion_rate = arbitrage_config_map["secondary_to_primary_base_conversion_rate"].value
     secondary_to_primary_quote_conversion_rate = arbitrage_config_map["secondary_to_primary_quote_conversion_rate"].value
+    one_way_mode = arbitrage_config_map["one_way_mode"].value
 
     try:
         primary_trading_pair: str = raw_primary_trading_pair
@@ -44,4 +45,5 @@ def start(self):
                               use_oracle_conversion_rate=use_oracle_conversion_rate,
                               secondary_to_primary_base_conversion_rate=secondary_to_primary_base_conversion_rate,
                               secondary_to_primary_quote_conversion_rate=secondary_to_primary_quote_conversion_rate,
+                              one_way_mode=one_way_mode,
                               hb_app_notification=True)
