@@ -578,15 +578,7 @@ class ExmoExchange(ExchangeBase):
         local_asset_names = set(self._account_balances.keys())
         remote_asset_names = set()
         account_info = await self._api_request("post", CONSTANTS.GET_ACCOUNT_SUMMARY_PATH_URL, {})
-        for asset_name in account_info["balances"].keys():
-            self._account_available_balances[asset_name] = Decimal(str(account_info["balances"][asset_name]))
-            self._account_balances[asset_name] = Decimal(str(account_info["balances"][asset_name])) + Decimal(str(account_info["reserved"][asset_name]))
-            remote_asset_names.add(asset_name)
-
-        asset_names_to_remove = local_asset_names.difference(remote_asset_names)
-        for asset_name in asset_names_to_remove:
-            del self._account_available_balances[asset_name]
-            del self._account_balances[asset_name]
+        self._process_balance_snapshot(account_info)
 
         self._in_flight_orders_snapshot = {k: copy.copy(v) for k, v in self._in_flight_orders.items()}
         self._in_flight_orders_snapshot_timestamp = self.current_timestamp
@@ -621,6 +613,20 @@ class ExmoExchange(ExchangeBase):
                 result = response["data"]
                 await self._process_trade_message_rest(result)
                 await self._process_order_message(result)
+
+    def _process_balance_snapshot(self, account_info: Dict[str, Any]):
+        local_asset_names = set(self._account_balances.keys())
+        remote_asset_names = set()
+
+        for asset_name in account_info["balances"].keys():
+            self._account_available_balances[asset_name] = Decimal(str(account_info["balances"][asset_name]))
+            self._account_balances[asset_name] = Decimal(str(account_info["balances"][asset_name])) + Decimal(str(account_info["reserved"][asset_name]))
+            remote_asset_names.add(asset_name)
+
+        asset_names_to_remove = local_asset_names.difference(remote_asset_names)
+        for asset_name in asset_names_to_remove:
+            del self._account_available_balances[asset_name]
+            del self._account_balances[asset_name]
 
     async def _process_order_message(self, order_msg: Dict[str, Any]):
         """
@@ -840,65 +846,17 @@ class ExmoExchange(ExchangeBase):
         """
         async for event_message in self._iter_user_event_queue():
             try:
-                if "data" not in event_message:
-                    continue
-                for msg in event_message["data"]:     # data is a list
-                    await self._process_order_message(msg)
-                    await self._process_trade_message_ws(msg)
+                event_type = event_message.get("topic")
+                if event_type == "spot/wallet":
+                    if event_message["event"] == "snapshot":
+                        self._process_balance_snapshot(event_message["data"])
+                    elif event_message["event"] == "update":
+                        asset_name = event_message["data"]["currency"]
+                        self._account_available_balances[asset_name] = Decimal(str(event_message["data"]["balance"]))
+                        self._account_balances[asset_name] = Decimal(str(event_message["data"]["balance"])) + Decimal(str(event_message["data"]["reserved"]))
+                elif event_type == "spot/user_trades"
             except asyncio.CancelledError:
                 raise
             except Exception:
                 self.logger().error("Unexpected error in user stream listener loop.", exc_info=True)
                 await asyncio.sleep(5.0)
-
-    async def get_open_orders(self) -> List[OpenOrder]:
-        if self._trading_pairs is None:
-            raise Exception("get_open_orders can only be used when trading_pairs are specified.")
-
-        page_len = 100
-        responses = []
-        for trading_pair in self._trading_pairs:
-            page = 1
-            while True:
-                response = await self._api_request("get", CONSTANTS.GET_OPEN_ORDERS_PATH_URL,
-                                                   {"symbol": exmo_utils.convert_to_exchange_trading_pair(trading_pair),
-                                                    "offset": page,
-                                                    "limit": page_len,
-                                                    "status": "9"},
-                                                   "KEYED")
-                responses.append(response)
-                count = len(response["data"]["orders"])
-                if count < page_len:
-                    break
-                else:
-                    page += 1
-
-        for order in self._in_flight_orders.values():
-            await order.get_exchange_order_id()
-
-        ret_val = []
-        for response in responses:
-            for order in response["data"]["orders"]:
-                exchange_order_id = str(order["order_id"])
-                tracked_orders = list(self._in_flight_orders.values())
-                tracked_order = [o for o in tracked_orders if exchange_order_id == o.exchange_order_id]
-                if not tracked_order:
-                    continue
-                tracked_order = tracked_order[0]
-                if order["type"] != "limit":
-                    raise Exception(f"Unsupported order type {order['type']}")
-                ret_val.append(
-                    OpenOrder(
-                        client_order_id=tracked_order.client_order_id,
-                        trading_pair=exmo_utils.convert_from_exchange_trading_pair(order["symbol"]),
-                        price=Decimal(str(order["price"])),
-                        amount=Decimal(str(order["size"])),
-                        executed_amount=Decimal(str(order["filled_size"])),
-                        status=CONSTANTS.ORDER_STATUS[int(order["status"])],
-                        order_type=OrderType.LIMIT,
-                        is_buy=True if order["side"].lower() == "buy" else False,
-                        time=int(order["create_time"]),
-                        exchange_order_id=str(order["order_id"])
-                    )
-                )
-        return ret_val

@@ -1,5 +1,6 @@
 import hmac
 import json
+import base64
 import urllib
 import hashlib
 from typing import Dict, Any
@@ -41,22 +42,16 @@ class ExmoAuth():
     def get_ws_auth_payload(self, timestamp: int = None):
         """
         Generates websocket payload.
-        :return: a dictionary of auth headers with api_key, timestamp, signature
+        :return: a dictionary of auth headers with api_key, nonce, signature
         """
 
-        payload = f'{str(timestamp)}#{self.memo}#exmo.WebSocket'
-
-        sign = hmac.new(
-            self.secret_key.encode('utf-8'),
-            payload.encode('utf-8'),
-            hashlib.sha256
-        ).hexdigest()
+        sign = hmac.new(self.secret_key.encode('utf8'), (self.api_key + str(timestamp)).encode('utf8'), hashlib.sha512).digest()
+        sign = base64.b64encode(sign).decode('utf8')
 
         return {
-            "op": "login",
-            "args": [
-                self.api_key,
-                str(timestamp),
-                sign
-            ]
+            "id": 1,
+            "method": "login",
+            "api_key": self.api_key,
+            "sign": sign,
+            "nonce": str(timestamp)
         }

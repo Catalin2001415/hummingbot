@@ -58,7 +58,7 @@ class ExmoAPIUserStreamDataSource(UserStreamTrackerDataSource):
         """
         try:
             if self._websocket_client is None:
-                self._websocket_client = await websockets.connect(CONSTANTS.WSS_URL)
+                self._websocket_client = await websockets.connect(CONSTANTS.WSS_PRIVATE_URL)
             return self._websocket_client
         except Exception:
             self.logger().network("Unexpected error occured with Exmo WebSocket Connection")
@@ -74,7 +74,7 @@ class ExmoAPIUserStreamDataSource(UserStreamTrackerDataSource):
             auth_resp = await ws.recv()
             auth_resp: Dict[str, Any] = ujson.loads(auth_resp)
 
-            if "errorCode" in auth_resp:
+            if "event" not in auth_resp and auth_resp["event"] != "logged_in":
                 self.logger().error(f"WebSocket login errored with message: {auth_resp['errorMessage']}",
                                     exc_info=True)
                 raise ConnectionError
@@ -92,8 +92,9 @@ class ExmoAPIUserStreamDataSource(UserStreamTrackerDataSource):
             # Exmo WebSocket API currently offers only spot/user/order private channel.
             for trading_pair in self._trading_pairs:
                 params: Dict[str, Any] = {
-                    "op": "subscribe",
-                    "args": [f"spot/user/order:{exmo_utils.convert_to_exchange_trading_pair(trading_pair)}"]
+                    "id": 2,
+                    "method": "subscribe",
+                    "topics": ["spot/wallet", "spot/orders", "spot/user_trades"]
                 }
                 await ws.send(ujson.dumps(params))
 
