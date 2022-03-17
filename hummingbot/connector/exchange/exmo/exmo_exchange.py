@@ -578,10 +578,9 @@ class ExmoExchange(ExchangeBase):
         local_asset_names = set(self._account_balances.keys())
         remote_asset_names = set()
         account_info = await self._api_request("post", CONSTANTS.GET_ACCOUNT_SUMMARY_PATH_URL, {})
-        for account in account_info["data"]["wallet"]:
-            asset_name = account["id"]
-            self._account_available_balances[asset_name] = Decimal(str(account["available"]))
-            self._account_balances[asset_name] = Decimal(str(account["available"])) + Decimal(str(account["frozen"]))
+        for asset_name in account_info["balances"].keys():
+            self._account_available_balances[asset_name] = Decimal(str(account_info["balances"][asset_name]))
+            self._account_balances[asset_name] = Decimal(str(account_info["balances"][asset_name])) + Decimal(str(account_info["reserved"][asset_name]))
             remote_asset_names.add(asset_name)
 
         asset_names_to_remove = local_asset_names.difference(remote_asset_names)
@@ -768,44 +767,30 @@ class ExmoExchange(ExchangeBase):
         :param timeout_seconds: The timeout at which the operation will be canceled.
         :returns List of CancellationResult which indicates whether each order is successfully cancelled.
         """
-        if self._trading_pairs is None:
-            raise Exception("cancel_all can only be used when trading_pairs are specified.")
-        for order in self._in_flight_orders.values():
-            await order.get_exchange_order_id()
-        tracked_orders: Dict[str, ExmoInFlightOrder] = self._in_flight_orders.copy().items()
-        cancellation_results = []
+        incomplete_orders = [o for o in self.in_flight_orders.values() if not o.is_done]
+        tasks = [self._execute_cancel(o.trading_pair, o.client_order_id) for o in incomplete_orders]
+        order_id_set = set([o.client_order_id for o in incomplete_orders])
+        successful_cancellations = []
+
         try:
-            tasks = []
-
-            for _, order in tracked_orders:
-                api_params = {
-                    "symbol": exmo_utils.convert_to_exchange_trading_pair(order.trading_pair),
-                    "order_id": int(order.exchange_order_id),
-                }
-                tasks.append(self._api_request("post",
-                                               CONSTANTS.CANCEL_ORDER_PATH_URL,
-                                               api_params,
-                                               "SIGNED"))
-
-            await safe_gather(*tasks)
-
-            open_orders = await self.get_open_orders()
-            for cl_order_id, tracked_order in tracked_orders:
-                open_order = [o for o in open_orders if o.client_order_id == cl_order_id]
-                if not open_order:
-                    cancellation_results.append(CancellationResult(cl_order_id, True))
-                    self.trigger_event(MarketEvent.OrderCancelled,
-                                       OrderCancelledEvent(self.current_timestamp, cl_order_id))
-                    self.stop_tracking_order(cl_order_id)
-                else:
-                    cancellation_results.append(CancellationResult(cl_order_id, False))
+            async with timeout(timeout_seconds):
+                cancellation_results = await safe_gather(*tasks, return_exceptions=True)
+                for cr in cancellation_results:
+                    if isinstance(cr, Exception):
+                        continue
+                    if isinstance(cr, str):
+                        client_order_id = cr
+                        order_id_set.remove(client_order_id)
+                        successful_cancellations.append(CancellationResult(client_order_id, True))
         except Exception:
             self.logger().network(
-                "Failed to cancel all orders.",
+                "Unexpected error cancelling orders.",
                 exc_info=True,
-                app_warning_msg="Failed to cancel all orders on Exmo. Check API key and network connection."
+                app_warning_msg="Failed to cancel order with Binance. Check API key and network connection."
             )
-        return cancellation_results
+
+        failed_cancellations = [CancellationResult(oid, False) for oid in order_id_set]
+        return successful_cancellations + failed_cancellations
 
     def tick(self, timestamp: float):
         """
