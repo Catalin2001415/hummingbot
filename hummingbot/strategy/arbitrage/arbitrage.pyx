@@ -398,10 +398,10 @@ cdef class ArbitrageStrategy(StrategyBase):
 
         if self._current_profitability[1] > self._current_profitability[0]:
             # it is more profitable to buy on market_1 and sell on market_2
-            if self._one_way_mode == 1:
+            if self._one_way_mode == 0 or self._one_way_mode == 1:
                 self.c_process_market_pair_inner(market_pair.first, market_pair.second)
         else:
-            if self._one_way_mode == 2:
+            if self._one_way_mode == 0 or self._one_way_mode == 2:
                 self.c_process_market_pair_inner(market_pair.second, market_pair.first)
 
     cdef c_process_market_pair_inner(self, object buy_market_trading_pair_tuple, object sell_market_trading_pair_tuple):

@@ -5,7 +5,8 @@ from hummingbot.client.config.config_validators import (
     validate_exchange,
     validate_market_trading_pair,
     validate_decimal,
-    validate_bool
+    validate_bool,
+    validate_int
 )
 from hummingbot.client.config.config_helpers import parse_cvar_value
 from hummingbot.client.settings import AllConnectorSettings, required_exchanges
@@ -135,7 +136,7 @@ arbitrage_config_map = {
         prompt="Enter the direction of arbitrage trade you want to allow, e.g, "
                 "0: Allow both directions (default)"
                 "1: Allow buying on primary market and selling on secondary market"
-                "2: Allow selling on primary market and buying on secondary market"
+                "2: Allow selling on primary market and buying on secondary market",
         prompt_on_new=True,
         type_str="int",
         validator=lambda v: validate_int(v, min_value=0, max_value=2, inclusive=True),
