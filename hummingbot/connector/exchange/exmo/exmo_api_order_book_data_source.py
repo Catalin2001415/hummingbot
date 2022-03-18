@@ -111,7 +111,6 @@ class ExmoAPIOrderBookDataSource(OrderBookTrackerDataSource):
             while True:
                 try:
                     msg: str = await asyncio.wait_for(ws.recv(), timeout=self.MESSAGE_TIMEOUT)
-                    msg = exmo_utils.decompress_ws_message(msg)
                     yield msg
                 except asyncio.TimeoutError:
                     pong_waiter = await ws.ping()
@@ -129,7 +128,7 @@ class ExmoAPIOrderBookDataSource(OrderBookTrackerDataSource):
         Initialize WebSocket client
         """
         try:
-            ws = await websockets.connect(uri=CONSTANTS.WSS_URL)
+            ws = await websockets.connect(uri=CONSTANTS.WSS_PUBLIC_URL)
             return ws
         except asyncio.CancelledError:
             raise
@@ -153,29 +152,29 @@ class ExmoAPIOrderBookDataSource(OrderBookTrackerDataSource):
                 ws: websockets.WebSocketClientProtocol = await self._create_websocket_connection()
 
                 for trading_pair in self._trading_pairs:
+                    exchange_trading_pair = exmo_utils.convert_to_exchange_trading_pair(trading_pair)
                     params: Dict[str, Any] = {
-                        "op": "subscribe",
-                        "args": [f"spot/trade:{exmo_utils.convert_to_exchange_trading_pair(trading_pair)}"]
+                        "id": 1,
+                        "method": "subscribe",
+                        "topics": [f"spot/trades:{exchange_trading_pair}", f"spot/ticker:{exchange_trading_pair}"]}
                     }
                     await ws.send(ujson.dumps(params))
 
                 async for raw_msg in self._inner_messages(ws):
-                    messages = ujson.loads(raw_msg)
-                    if messages is None:
-                        continue
-                    if "errorCode" in messages or "data" not in messages:
-                        # Error/Unrecognized response from "depth400" channel
+                    message = ujson.loads(raw_msg)
+                    if message is None or "data" not in message:
                         continue
 
-                    for msg in messages["data"]:        # data is a list
-                        msg_timestamp: float = float(msg["s_t"] * 1000)
-                        t_pair = exmo_utils.convert_from_exchange_trading_pair(msg["symbol"])
+                    if "spot/trades" in message["topic"]:
+                        t_pair = exmo_utils.convert_from_exchange_trading_pair(message["topic"].split(":")[1])
+                        for msg in messages["data"]:        # data is a list
+                            msg_timestamp: float = float(msg["date"])
 
-                        trade_msg: OrderBookMessage = ExmoOrderBook.trade_message_from_exchange(
-                            msg=msg,
-                            timestamp=msg_timestamp,
-                            metadata={"trading_pair": t_pair})
-                        output.put_nowait(trade_msg)
+                            trade_msg: OrderBookMessage = ExmoOrderBook.trade_message_from_exchange(
+                                msg=msg,
+                                timestamp=msg_timestamp,
+                                metadata={"trading_pair": t_pair})
+                            output.put_nowait(trade_msg)
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -193,18 +192,17 @@ class ExmoAPIOrderBookDataSource(OrderBookTrackerDataSource):
                 ws: websockets.WebSocketClientProtocol = await self._create_websocket_connection()
 
                 for trading_pair in self._trading_pairs:
+                    exchange_trading_pair = exmo_utils.convert_to_exchange_trading_pair(trading_pair)
                     params: Dict[str, Any] = {
-                        "op": "subscribe",
-                        "args": [f"spot/depth400:{exmo_utils.convert_to_exchange_trading_pair(trading_pair)}"]
+                        "id": 1,
+                        "method": "subscribe",
+                        "topics": [f"spot/order_book_snapshots:{exchange_trading_pair}", f"spot/order_book_updates:{exchange_trading_pair}"]}
                     }
                     await ws.send(ujson.dumps(params))
 
                 async for raw_msg in self._inner_messages(ws):
-                    messages = ujson.loads(raw_msg)
-                    if messages is None:
-                        continue
-                    if "errorCode" in messages or "data" not in messages:
-                        # Error/Unrecognized response from "depth400" channel
+                    message = ujson.loads(raw_msg)
+                    if message is None or "data" not in message:
                         continue
 
                     for msg in messages["data"]:        # data is a list

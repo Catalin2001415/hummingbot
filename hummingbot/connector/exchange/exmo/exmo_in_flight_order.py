@@ -81,40 +81,21 @@ class ExmoInFlightOrder(InFlightOrderBase):
         retval.last_state = data["last_state"]
         return retval
 
-    def update_with_trade_update_rest(self, trade_update: Dict[str, Any]) -> Tuple[Decimal, Decimal, str]:
+    def update_with_order_update(self, trade_update: Dict[str, Any]) -> Tuple[Decimal, Decimal, str]:
         """
-        Updates the in flight order with trade update (from trade message REST API)
+        Updates the in flight order with trade update from spot/user_trade message WebSocket API
         return: True if the order gets updated otherwise False
         """
-        if Decimal(trade_update["filled_size"]) <= self.executed_amount_base:
-            return (0, 0, "")
-        trade_id = f'rest_{str(exmo_utils.get_ms_timestamp())}'
+        trade_id = trade_update["trade_id"]
+        if str(trade_update["order_id"]) != self.exchange_order_id or trade_id in self.trade_id_set:
+            # trade already recorded
+            return False
         self.trade_id_set.add(trade_id)
+        self.executed_amount_base += Decimal(trade_update["quantity"])
+        self.executed_amount_quote += Decimal(trade_update["amount"])
+        self.fee_paid += Decimal(str(trade_update["commission_amount"]))
 
-        executed_amount_base = Decimal(trade_update["filled_size"])
-        executed_amount_quote = Decimal(trade_update["filled_notional"])
-        delta_trade_amount = executed_amount_base - self.executed_amount_base
-        self.executed_amount_base = executed_amount_base
-        delta_trade_price = (executed_amount_quote - self.executed_amount_quote) / delta_trade_amount
-        self.executed_amount_quote = executed_amount_quote
+        if not self.fee_asset:
+            self.fee_asset = trade_update["commission_currency"]
 
-        return delta_trade_amount, delta_trade_price, trade_id
-
-    def update_with_order_update_ws(self, trade_update: Dict[str, Any]) -> Tuple[Decimal, Decimal, str]:
-        """
-        Updates the in flight order with trade update (from order message WebSocket API)
-        return: True if the order gets updated otherwise False
-        """
-        if trade_update["last_fill_count"] == '0' or Decimal(trade_update["filled_size"]) <= self.executed_amount_base:
-            return (0, 0, "")
-        trade_id = f'ws_{str(exmo_utils.get_ms_timestamp())}'
-        self.trade_id_set.add(trade_id)
-
-        executed_amount_base = Decimal(trade_update["filled_size"])
-        executed_amount_quote = Decimal(trade_update["filled_notional"])
-        delta_trade_amount = executed_amount_base - self.executed_amount_base
-        self.executed_amount_base = executed_amount_base
-        delta_trade_price = (executed_amount_quote - self.executed_amount_quote) / delta_trade_amount
-        self.executed_amount_quote = executed_amount_quote
-
-        return delta_trade_amount, delta_trade_price, trade_id
+        return True

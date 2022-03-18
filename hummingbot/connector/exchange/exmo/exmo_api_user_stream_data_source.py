@@ -110,7 +110,6 @@ class ExmoAPIUserStreamDataSource(UserStreamTrackerDataSource):
             while True:
                 try:
                     msg: str = await asyncio.wait_for(ws.recv(), timeout=self.MESSAGE_TIMEOUT)
-                    msg = exmo_utils.decompress_ws_message(msg)
                     self._last_recv_time = time.time()
                     yield msg
                 except asyncio.TimeoutError:

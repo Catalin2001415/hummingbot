@@ -557,6 +557,7 @@ class ExmoExchange(ExchangeBase):
                 await self._poll_notifier.wait()
                 await safe_gather(
                     self._update_balances(),
+                    self._update_trade_status(),
                     self._update_order_status(),
                 )
                 self._last_poll_timestamp = self.current_timestamp
@@ -599,8 +600,36 @@ class ExmoExchange(ExchangeBase):
                 tasks.append(self._api_request("get",
                                                CONSTANTS.GET_ORDER_DETAIL_PATH_URL,
                                                {"order_id": int(order_id),
-                                                "symbol": exmo_utils.convert_to_exchange_trading_pair(trading_pair)},
-                                               "KEYED"
+                                                "symbol": exmo_utils.convert_to_exchange_trading_pair(trading_pair)}
+                                               ))
+            self.logger().debug(f"Polling for order status updates of {len(tasks)} orders.")
+            responses = await safe_gather(*tasks, return_exceptions=True)
+            for response in responses:
+                if isinstance(response, Exception):
+                    raise response
+                if "data" not in response:
+                    self.logger().info(f"_update_order_status data not in resp: {response}")
+                    continue
+                result = response["data"]
+                await self._process_trade_message_rest(result)
+                await self._process_order_message(result)
+
+    async def _update_trade_status(self):
+        """
+        Calls REST API to get status update for user trades.
+        """
+        last_tick = int(self._last_poll_timestamp / self.UPDATE_ORDER_STATUS_MIN_INTERVAL)
+        current_tick = int(self.current_timestamp / self.UPDATE_ORDER_STATUS_MIN_INTERVAL)
+
+        if current_tick > last_tick and len(self._in_flight_orders) > 0:
+            tracked_orders = list(self._in_flight_orders.values())
+            tasks = []
+            for tracked_order in tracked_orders:
+                order_id = await tracked_order.get_exchange_order_id()
+                trading_pair = tracked_order.trading_pair
+                tasks.append(self._api_request("posy",
+                                               CONSTANTS.GET_ORDER_DETAIL_PATH_URL,
+                                               {"pair": exmo_utils.convert_to_exchange_trading_pair(trading_pair)}
                                                ))
             self.logger().debug(f"Polling for order status updates of {len(tasks)} orders.")
             responses = await safe_gather(*tasks, return_exceptions=True)
@@ -667,57 +696,7 @@ class ExmoExchange(ExchangeBase):
                                ))
             self.stop_tracking_order(client_order_id)
 
-    async def _process_trade_message_rest(self, trade_msg: Dict[str, Any]):
-        """
-        Updates in-flight order and trigger order filled event for trade message received from REST API. Triggers order completed
-        event if the total executed amount equals to the specified order amount.
-        """
-        for order in self._in_flight_orders.values():
-            await order.get_exchange_order_id()
-        track_order = [o for o in self._in_flight_orders.values() if str(trade_msg["order_id"]) == o.exchange_order_id]
-        if not track_order:
-            return
-        tracked_order = track_order[0]
-        (delta_trade_amount, delta_trade_price, trade_id) = tracked_order.update_with_trade_update_rest(trade_msg)
-        if not delta_trade_amount:
-            return
-        self.trigger_event(
-            MarketEvent.OrderFilled,
-            OrderFilledEvent(
-                self.current_timestamp,
-                tracked_order.client_order_id,
-                tracked_order.trading_pair,
-                tracked_order.trade_type,
-                tracked_order.order_type,
-                delta_trade_price,
-                delta_trade_amount,
-                # TradeFee(0.0, [(trade_msg["fee_coin_name"], Decimal(str(trade_msg["fees"])))]),
-                estimate_fee.estimate_fee(self.name, tracked_order.order_type in [OrderType.LIMIT, OrderType.LIMIT_MAKER]),
-                exchange_trade_id=trade_id
-            )
-        )
-        if math.isclose(tracked_order.executed_amount_base, tracked_order.amount) or tracked_order.executed_amount_base >= tracked_order.amount:
-            tracked_order.last_state = "FILLED"
-            self.logger().info(f"The {tracked_order.trade_type.name} order "
-                               f"{tracked_order.client_order_id} has completed "
-                               f"according to trade status rest API.")
-            event_tag = MarketEvent.BuyOrderCompleted if tracked_order.trade_type is TradeType.BUY \
-                else MarketEvent.SellOrderCompleted
-            event_class = BuyOrderCompletedEvent if tracked_order.trade_type is TradeType.BUY \
-                else SellOrderCompletedEvent
-            self.trigger_event(event_tag,
-                               event_class(self.current_timestamp,
-                                           tracked_order.client_order_id,
-                                           tracked_order.base_asset,
-                                           tracked_order.quote_asset,
-                                           tracked_order.fee_asset,
-                                           tracked_order.executed_amount_base,
-                                           tracked_order.executed_amount_quote,
-                                           tracked_order.fee_paid,
-                                           tracked_order.order_type))
-            self.stop_tracking_order(tracked_order.client_order_id)
-
-    async def _process_trade_message_ws(self, trade_msg: Dict[str, Any]):
+    async def _process_trade_message(self, trade_msg: Dict[str, Any]):
         """
         Updates in-flight order and trigger order filled event for order message received from WebSocket API. Triggers order completed
         event if the total executed amount equals to the specified order amount.
@@ -728,8 +707,8 @@ class ExmoExchange(ExchangeBase):
         if not track_order:
             return
         tracked_order = track_order[0]
-        (delta_trade_amount, delta_trade_price, trade_id) = tracked_order.update_with_order_update_ws(trade_msg)
-        if not delta_trade_amount:
+        updated = tracked_order.update_with_trade_update(trade_msg)
+        if not updated:
             return
         self.trigger_event(
             MarketEvent.OrderFilled,
@@ -739,10 +718,10 @@ class ExmoExchange(ExchangeBase):
                 tracked_order.trading_pair,
                 tracked_order.trade_type,
                 tracked_order.order_type,
-                delta_trade_price,
-                delta_trade_amount,
-                estimate_fee.estimate_fee(self.name, tracked_order.order_type in [OrderType.LIMIT, OrderType.LIMIT_MAKER]),
-                exchange_trade_id=trade_id
+                Decimal(str(trade_msg["price"])),
+                Decimal(str(trade_msg["quantity"])),
+                TradeFee(0.0, [(trade_msg["commission_currency"], Decimal(str(trade_msg["commission_amount"])))]),
+                exchange_trade_id=trade_msg["trade_id"]
             )
         )
         if math.isclose(tracked_order.executed_amount_base, tracked_order.amount) or tracked_order.executed_amount_base >= tracked_order.amount:
@@ -854,7 +833,14 @@ class ExmoExchange(ExchangeBase):
                         asset_name = event_message["data"]["currency"]
                         self._account_available_balances[asset_name] = Decimal(str(event_message["data"]["balance"]))
                         self._account_balances[asset_name] = Decimal(str(event_message["data"]["balance"])) + Decimal(str(event_message["data"]["reserved"]))
-                elif event_type == "spot/user_trades"
+                elif event_type == "spot/user_trades":
+                    await self._process_trade_message(event_message["data"])
+                elif event_type == "spot/orders":
+                    if event_message["event"] == "snapshot":
+                        for order_msg in event_message["data"]:
+                            await self._process_order_message(order_msg)
+                    elif event_message["event"] == "update":
+                        await self._process_order_message(event_message["data"])
             except asyncio.CancelledError:
                 raise
             except Exception:
