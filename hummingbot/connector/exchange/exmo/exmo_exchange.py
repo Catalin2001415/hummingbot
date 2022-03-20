@@ -318,7 +318,7 @@ class ExmoExchange(ExchangeBase):
     async def _api_request(self,
                            method: str,
                            path_url: str,
-                           params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                           params: Optional[Dict[str, Any]] = {}) -> Dict[str, Any]:
         """
         Sends an aiohttp request and waits for a response.
         :param method: The HTTP method, e.g. get or post
@@ -536,6 +536,13 @@ class ExmoExchange(ExchangeBase):
             # result = True is a successful cancel, False indicates cancel failed due to already cancelled or matched
             if "result" in response and not response["result"]:
                 raise ValueError(f"Failed to cancel order - {order_id}. Order was already matched or cancelled on the exchange.")
+
+            order_msg = {
+                "order_id": ex_order_id,
+                "status": "cancelled",
+                "quantity": "0.1"   # any quantity above 0 will work, to process it as a user cancelled order and not a filled order.
+            }
+            await self._process_order_message(order_msg)
             return order_id
         except asyncio.CancelledError:
             raise
@@ -558,7 +565,6 @@ class ExmoExchange(ExchangeBase):
                 await safe_gather(
                     self._update_balances(),
                     self._update_trade_status(),
-                    self._update_order_status(),
                 )
                 self._last_poll_timestamp = self.current_timestamp
                 self._poll_notifier.clear()
@@ -584,36 +590,6 @@ class ExmoExchange(ExchangeBase):
         self._in_flight_orders_snapshot = {k: copy.copy(v) for k, v in self._in_flight_orders.items()}
         self._in_flight_orders_snapshot_timestamp = self.current_timestamp
 
-    async def _update_order_status(self):
-        """
-        Calls REST API to get status update for each in-flight order.
-        """
-        last_tick = int(self._last_poll_timestamp / self.UPDATE_ORDER_STATUS_MIN_INTERVAL)
-        current_tick = int(self.current_timestamp / self.UPDATE_ORDER_STATUS_MIN_INTERVAL)
-
-        if current_tick > last_tick and len(self._in_flight_orders) > 0:
-            tracked_orders = list(self._in_flight_orders.values())
-            tasks = []
-            for tracked_order in tracked_orders:
-                order_id = await tracked_order.get_exchange_order_id()
-                trading_pair = tracked_order.trading_pair
-                tasks.append(self._api_request("get",
-                                               CONSTANTS.GET_ORDER_DETAIL_PATH_URL,
-                                               {"order_id": int(order_id),
-                                                "symbol": exmo_utils.convert_to_exchange_trading_pair(trading_pair)}
-                                               ))
-            self.logger().debug(f"Polling for order status updates of {len(tasks)} orders.")
-            responses = await safe_gather(*tasks, return_exceptions=True)
-            for response in responses:
-                if isinstance(response, Exception):
-                    raise response
-                if "data" not in response:
-                    self.logger().info(f"_update_order_status data not in resp: {response}")
-                    continue
-                result = response["data"]
-                await self._process_trade_message_rest(result)
-                await self._process_order_message(result)
-
     async def _update_trade_status(self):
         """
         Calls REST API to get status update for user trades.
@@ -622,13 +598,15 @@ class ExmoExchange(ExchangeBase):
         current_tick = int(self.current_timestamp / self.UPDATE_ORDER_STATUS_MIN_INTERVAL)
 
         if current_tick > last_tick and len(self._in_flight_orders) > 0:
-            tracked_orders = list(self._in_flight_orders.values())
+            if len(self._in_flight_orders) > 0:
+                trading_pairs_set = set()
+                for o in self._in_flight_orders.values():
+                    trading_pairs_set.add(o.trading_pair)
+
             tasks = []
-            for tracked_order in tracked_orders:
-                order_id = await tracked_order.get_exchange_order_id()
-                trading_pair = tracked_order.trading_pair
-                tasks.append(self._api_request("posy",
-                                               CONSTANTS.GET_ORDER_DETAIL_PATH_URL,
+            for trading_pair in trading_pairs_set:
+                tasks.append(self._api_request("post",
+                                               CONSTANTS.GET_TRADE_DETAIL_PATH_URL,
                                                {"pair": exmo_utils.convert_to_exchange_trading_pair(trading_pair)}
                                                ))
             self.logger().debug(f"Polling for order status updates of {len(tasks)} orders.")
@@ -636,12 +614,9 @@ class ExmoExchange(ExchangeBase):
             for response in responses:
                 if isinstance(response, Exception):
                     raise response
-                if "data" not in response:
-                    self.logger().info(f"_update_order_status data not in resp: {response}")
-                    continue
-                result = response["data"]
-                await self._process_trade_message_rest(result)
-                await self._process_order_message(result)
+                for pair, trade_list in response:
+                    for trade_msg in trade_list:
+                        await self._process_trade_message(trade_msg)
 
     def _process_balance_snapshot(self, account_info: Dict[str, Any]):
         local_asset_names = set(self._account_balances.keys())
@@ -673,10 +648,10 @@ class ExmoExchange(ExchangeBase):
         client_order_id = tracked_order.client_order_id
 
         # Update order execution status
-        if "status" in order_msg:       # REST API
-            tracked_order.last_state = CONSTANTS.ORDER_STATUS[int(order_msg["status"])]
-        elif "state" in order_msg:      # WebSocket
-            tracked_order.last_state = CONSTANTS.ORDER_STATUS[int(order_msg["state"])]
+        if ("status" in order_msg and order_msg["status"] == "cancelled") and Decimal(str(order_msg["quantity"])) != Decimal("0"):
+            tracked_order.last_state = "CANCELED"
+        elif ("status" in order_msg and order_msg["status"] in {"open", "executing"}:
+            tracked_order.last_state = "ACTIVE"
 
         if tracked_order.is_cancelled:
             self.logger().info(f"Successfully cancelled order {client_order_id}.")
