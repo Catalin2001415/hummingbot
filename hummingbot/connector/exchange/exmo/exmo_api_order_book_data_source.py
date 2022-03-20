@@ -168,7 +168,7 @@ class ExmoAPIOrderBookDataSource(OrderBookTrackerDataSource):
                     if "spot/trades" in message["topic"]:
                         t_pair = exmo_utils.convert_from_exchange_trading_pair(message["topic"].split(":")[1])
                         for msg in messages["data"]:        # data is a list
-                            msg_timestamp: float = float(msg["date"])
+                            msg_timestamp: int = int(msg["date"])
 
                             trade_msg: OrderBookMessage = ExmoOrderBook.trade_message_from_exchange(
                                 msg=msg,
@@ -205,10 +205,10 @@ class ExmoAPIOrderBookDataSource(OrderBookTrackerDataSource):
                     if message is None or "data" not in message:
                         continue
 
-                    for msg in messages["data"]:        # data is a list
-                        msg_timestamp: float = float(msg["ms_t"])
-                        t_pair = exmo_utils.convert_from_exchange_trading_pair(msg["symbol"])
+                    msg_timestamp: int = int(msg["ts"])
+                    t_pair = exmo_utils.convert_from_exchange_trading_pair(message["topic"].split(":")[1])
 
+                    if "spot/order_book_snapshots" in message["topic"]::
                         snapshot_msg: OrderBookMessage = ExmoOrderBook.snapshot_message_from_exchange(
                             msg=msg,
                             timestamp=msg_timestamp,

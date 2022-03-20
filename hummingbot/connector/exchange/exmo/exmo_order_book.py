@@ -48,10 +48,10 @@ class ExmoOrderBook(OrderBook):
             msg.update(metadata)
 
         msg.update({
-            "exchange_order_id": str(msg.get("s_t")),
-            "trade_type": msg.get("side"),
+            "exchange_order_id": str(msg.get("trade_id")),
+            "trade_type": msg.get("type"),
             "price": msg.get("price"),
-            "amount": msg.get("size"),
+            "amount": msg.get("quantity"),
         })
 
         return ExmoOrderBookMessage(
