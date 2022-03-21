@@ -84,16 +84,18 @@ def convert_diff_message_to_order_book_row(message: OrderBookMessage) -> Tuple[L
 
 
 # Request ID class
-class RequestId:
+class ExmoNone:
     """
-    Generate request ids
+    Generate unique nonces
     """
-    _request_id: int = 0
+    _nonce: int = get_tracking_nonce()
 
     @classmethod
-    def generate_request_id(cls) -> int:
-        return get_tracking_nonce()
+    def get_nonce(cls) -> int:
+        cls._nonce += 1
+        return cls._nonce
 
+exmo_nonce = ExmoNone()
 
 def convert_from_exchange_trading_pair(exchange_trading_pair: str) -> str:
     return exchange_trading_pair.replace("_", "-")
@@ -104,7 +106,7 @@ def convert_to_exchange_trading_pair(hb_trading_pair: str) -> str:
 
 
 def get_new_client_order_id(is_buy: bool, trading_pair: str) -> str:
-    return get_tracking_nonce()
+    return f"{exmo_nonce.get_nonce()}"
 
 
 

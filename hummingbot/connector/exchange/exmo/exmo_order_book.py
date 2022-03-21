@@ -7,7 +7,7 @@ from hummingbot.core.data_type.order_book import OrderBook
 from hummingbot.core.data_type.order_book_message import (
     OrderBookMessageType
 )
-from hummingbot.connector.exchange.Exmo.Exmo_order_book_message import ExmoOrderBookMessage
+from hummingbot.connector.exchange.exmo.exmo_order_book_message import ExmoOrderBookMessage
 
 
 class ExmoOrderBook(OrderBook):

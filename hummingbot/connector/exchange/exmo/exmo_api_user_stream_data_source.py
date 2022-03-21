@@ -69,7 +69,7 @@ class ExmoAPIUserStreamDataSource(UserStreamTrackerDataSource):
         Authenticates user to websocket
         """
         try:
-            auth_payload: Dict[str, Any] = self._exmo_auth.get_ws_auth_payload(exmo_utils.get_ms_timestamp())
+            auth_payload: Dict[str, Any] = self._exmo_auth.get_ws_auth_payload(exmo_utils.exmo_nonce.get_nonce())
             await ws.send(ujson.dumps(auth_payload, escape_forward_slashes=False))
             auth_resp = await ws.recv()
             auth_resp: Dict[str, Any] = ujson.loads(auth_resp)

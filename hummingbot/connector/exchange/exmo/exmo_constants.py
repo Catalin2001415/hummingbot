@@ -3,7 +3,7 @@
 from hummingbot.core.api_throttler.data_types import RateLimit
 
 EXCHANGE_NAME = "exmo"
-REST_URL = "https://api.exmo.com/"
+REST_URL = "https://api.exmo.com"
 WSS_PUBLIC_URL = "wss://ws-api.exmo.com:443/v1/public"
 WSS_PRIVATE_URL = "wss://ws-api.exmo.com:443/v1/private"
 

@@ -16,7 +16,7 @@ class ExmoAuth():
 
     def get_headers(
         self,
-        timestamp: int = None,
+        nonce: int = None,
         params: Dict[str, Any] = {}
     ):
         """
@@ -24,7 +24,7 @@ class ExmoAuth():
         :return: a dictionary of auth headers
         """
 
-        params['nonce'] = timestamp
+        params['nonce'] = nonce
         payload =  urllib.parse.urlencode(params)
 
         sign = hmac.new(
@@ -39,13 +39,13 @@ class ExmoAuth():
             "sign": sign,
         }
 
-    def get_ws_auth_payload(self, timestamp: int = None):
+    def get_ws_auth_payload(self, nonce: int = None):
         """
         Generates websocket payload.
         :return: a dictionary of auth headers with api_key, nonce, signature
         """
 
-        sign = hmac.new(self.secret_key.encode('utf8'), (self.api_key + str(timestamp)).encode('utf8'), hashlib.sha512).digest()
+        sign = hmac.new(self.secret_key.encode('utf8'), (self.api_key + str(nonce)).encode('utf8'), hashlib.sha512).digest()
         sign = base64.b64encode(sign).decode('utf8')
 
         return {
@@ -53,5 +53,5 @@ class ExmoAuth():
             "method": "login",
             "api_key": self.api_key,
             "sign": sign,
-            "nonce": str(timestamp)
+            "nonce": str(nonce)
         }

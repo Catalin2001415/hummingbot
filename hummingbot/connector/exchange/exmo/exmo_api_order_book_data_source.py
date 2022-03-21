@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+import time
 import asyncio
 import logging
 import aiohttp
@@ -47,7 +48,7 @@ class ExmoAPIOrderBookDataSource(OrderBookTrackerDataSource):
             async with aiohttp.ClientSession() as client:
                 async with client.get(f"{CONSTANTS.REST_URL}/{CONSTANTS.GET_LAST_TRADING_PRICES_PATH_URL}", timeout=10) as response:
                     response_json = await response.json()
-                    for pair, ticker in response_json.keys():
+                    for pair, ticker in response_json.items():
                         t_pair = exmo_utils.convert_from_exchange_trading_pair(pair)
                         if t_pair in trading_pairs and ticker["last_trade"]:
                             result[t_pair] = float(ticker["last_trade"])
@@ -156,7 +157,7 @@ class ExmoAPIOrderBookDataSource(OrderBookTrackerDataSource):
                     params: Dict[str, Any] = {
                         "id": 1,
                         "method": "subscribe",
-                        "topics": [f"spot/trades:{exchange_trading_pair}", f"spot/ticker:{exchange_trading_pair}"]}
+                        "topics": [f"spot/trades:{exchange_trading_pair}", f"spot/ticker:{exchange_trading_pair}"]
                     }
                     await ws.send(ujson.dumps(params))
 
@@ -167,7 +168,7 @@ class ExmoAPIOrderBookDataSource(OrderBookTrackerDataSource):
 
                     if "spot/trades" in message["topic"]:
                         t_pair = exmo_utils.convert_from_exchange_trading_pair(message["topic"].split(":")[1])
-                        for msg in messages["data"]:        # data is a list
+                        for msg in message["data"]:        # data is a list
                             msg_timestamp: int = int(msg["date"])
 
                             trade_msg: OrderBookMessage = ExmoOrderBook.trade_message_from_exchange(
@@ -196,7 +197,7 @@ class ExmoAPIOrderBookDataSource(OrderBookTrackerDataSource):
                     params: Dict[str, Any] = {
                         "id": 1,
                         "method": "subscribe",
-                        "topics": [f"spot/order_book_snapshots:{exchange_trading_pair}", f"spot/order_book_updates:{exchange_trading_pair}"]}
+                        "topics": [f"spot/order_book_snapshots:{exchange_trading_pair}", f"spot/order_book_updates:{exchange_trading_pair}"]
                     }
                     await ws.send(ujson.dumps(params))
 
@@ -205,12 +206,12 @@ class ExmoAPIOrderBookDataSource(OrderBookTrackerDataSource):
                     if message is None or "data" not in message:
                         continue
 
-                    msg_timestamp: int = int(msg["ts"])
+                    msg_timestamp: int = int(message["ts"])
                     t_pair = exmo_utils.convert_from_exchange_trading_pair(message["topic"].split(":")[1])
 
-                    if "spot/order_book_snapshots" in message["topic"]::
+                    if "spot/order_book_snapshots" in message["topic"]:
                         snapshot_msg: OrderBookMessage = ExmoOrderBook.snapshot_message_from_exchange(
-                            msg=msg,
+                            msg=message["data"],
                             timestamp=msg_timestamp,
                             metadata={"trading_pair": t_pair}
                         )

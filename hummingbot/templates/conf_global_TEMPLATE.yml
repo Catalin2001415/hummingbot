@@ -70,6 +70,9 @@ bitmart_api_key: null
 bitmart_secret_key: null
 bitmart_memo: null
 
+exmo_api_key: null
+exmo_secret_key: null
+
 crypto_com_api_key: null
 crypto_com_secret_key: null
 
@@ -145,7 +148,7 @@ kill_switch_rate: null
 autofill_import: null
 
 # Paper Trading
-paper_trade_exchanges: 
+paper_trade_exchanges:
   - binance
   - kucoin
   - ascend_ex

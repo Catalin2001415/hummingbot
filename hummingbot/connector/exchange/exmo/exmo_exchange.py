@@ -299,7 +299,7 @@ class ExmoExchange(ExchangeBase):
         }
         """
         result = {}
-        for symbol, rule in symbols_details:
+        for symbol, rule in symbols_details.items():
             try:
                 trading_pair = exmo_utils.convert_from_exchange_trading_pair(symbol)
                 price_decimals = Decimal(str(rule["price_precision"]))
@@ -331,18 +331,18 @@ class ExmoExchange(ExchangeBase):
             url = f"{CONSTANTS.REST_URL}/{path_url}"
             client = await self._http_client()
 
-            headers = self._exmo_auth.get_headers(exmo_utils.get_ms_timestamp(), params)
+            headers = self._exmo_auth.get_headers(exmo_utils.exmo_nonce.get_nonce(), params)
 
-            params = urllib.urlencode(params)
+            params = urllib.parse.urlencode(params)
             if method == "get":
                 response = await client.get(url, params=params)
             elif method == "post":
-                response = await client.post(url, params=params, headers=headers)
+                response = await client.post(url, data=params, headers=headers)
             else:
                 raise NotImplementedError
 
             try:
-                parsed_response = json.loads(response.decode('utf-8'))
+                parsed_response = json.loads(await response.read())
             except Exception as e:
                 raise IOError(f"Error parsing data from {url}. Error: {str(e)}")
             if response.status != 200 or ('error' in parsed_response and parsed_response['error']):
@@ -614,7 +614,7 @@ class ExmoExchange(ExchangeBase):
             for response in responses:
                 if isinstance(response, Exception):
                     raise response
-                for pair, trade_list in response:
+                for pair, trade_list in response.items():
                     for trade_msg in trade_list:
                         await self._process_trade_message(trade_msg)
 
@@ -650,7 +650,7 @@ class ExmoExchange(ExchangeBase):
         # Update order execution status
         if ("status" in order_msg and order_msg["status"] == "cancelled") and Decimal(str(order_msg["quantity"])) != Decimal("0"):
             tracked_order.last_state = "CANCELED"
-        elif ("status" in order_msg and order_msg["status"] in {"open", "executing"}:
+        elif "status" in order_msg and order_msg["status"] in ["open", "executing"]:
             tracked_order.last_state = "ACTIVE"
 
         if tracked_order.is_cancelled:
@@ -733,15 +733,15 @@ class ExmoExchange(ExchangeBase):
         successful_cancellations = []
 
         try:
-            async with timeout(timeout_seconds):
-                cancellation_results = await safe_gather(*tasks, return_exceptions=True)
-                for cr in cancellation_results:
-                    if isinstance(cr, Exception):
-                        continue
-                    if isinstance(cr, str):
-                        client_order_id = cr
-                        order_id_set.remove(client_order_id)
-                        successful_cancellations.append(CancellationResult(client_order_id, True))
+            # async with timeout(timeout_seconds):
+            cancellation_results = await safe_gather(*tasks, return_exceptions=True)
+            for cr in cancellation_results:
+                if isinstance(cr, Exception):
+                    continue
+                if isinstance(cr, str):
+                    client_order_id = cr
+                    order_id_set.remove(client_order_id)
+                    successful_cancellations.append(CancellationResult(client_order_id, True))
         except Exception:
             self.logger().network(
                 "Unexpected error cancelling orders.",
