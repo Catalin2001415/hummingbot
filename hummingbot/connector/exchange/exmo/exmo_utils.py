@@ -83,17 +83,17 @@ def convert_diff_message_to_order_book_row(message: OrderBookMessage) -> Tuple[L
     return bids, asks
 
 
-# Request ID class
+# Nonce class
 class ExmoNone:
     """
     Generate unique nonces
     """
-    _nonce: int = get_tracking_nonce()
+    _request_id: int = 0
 
     @classmethod
     def get_nonce(cls) -> int:
-        cls._nonce += 1
-        return cls._nonce
+        return get_tracking_nonce()
+
 
 exmo_nonce = ExmoNone()
 
@@ -106,7 +106,7 @@ def convert_to_exchange_trading_pair(hb_trading_pair: str) -> str:
 
 
 def get_new_client_order_id(is_buy: bool, trading_pair: str) -> str:
-    return f"{exmo_nonce.get_nonce()}"
+    return f"{get_tracking_nonce()}"
 
 
 

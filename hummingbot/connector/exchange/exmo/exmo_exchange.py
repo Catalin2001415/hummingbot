@@ -57,7 +57,7 @@ class ExmoExchange(ExchangeBase):
     trading functionality.
     """
     API_CALL_TIMEOUT = 10.0
-    POLL_INTERVAL = 1.0
+    POLL_INTERVAL = 10.0
     UPDATE_ORDER_STATUS_MIN_INTERVAL = 10.0
     UPDATE_TRADE_STATUS_MIN_INTERVAL = 10.0
 
@@ -331,18 +331,21 @@ class ExmoExchange(ExchangeBase):
             url = f"{CONSTANTS.REST_URL}/{path_url}"
             client = await self._http_client()
 
-            headers = self._exmo_auth.get_headers(exmo_utils.exmo_nonce.get_nonce(), params)
+            headers = self._exmo_auth.get_headers(exmo_utils.ExmoNone.get_nonce(), params)
 
-            params = urllib.parse.urlencode(params)
             if method == "get":
-                response = await client.get(url, params=params)
+                get_params = urllib.parse.urlencode(params)
+                response = await client.get(url, params=get_params)
             elif method == "post":
-                response = await client.post(url, data=params, headers=headers)
+                post_params = urllib.parse.urlencode(params)
+                response = await client.post(url, data=post_params, headers=headers)
             else:
                 raise NotImplementedError
 
             try:
                 parsed_response = json.loads(await response.read())
+                if 'error' in parsed_response and "The nonce parameter is less or equal" in parsed_response['error']:
+                    parsed_response = await self._api_request(method, path_url, params)
             except Exception as e:
                 raise IOError(f"Error parsing data from {url}. Error: {str(e)}")
             if response.status != 200 or ('error' in parsed_response and parsed_response['error']):

@@ -48,10 +48,4 @@ class ExmoAuth():
         sign = hmac.new(self.secret_key.encode('utf8'), (self.api_key + str(nonce)).encode('utf8'), hashlib.sha512).digest()
         sign = base64.b64encode(sign).decode('utf8')
 
-        return {
-            "id": 1,
-            "method": "login",
-            "api_key": self.api_key,
-            "sign": sign,
-            "nonce": str(nonce)
-        }
+        return '{"id":1,"method":"login","api_key":"%s","sign":"%s","nonce":%s}' % (self.api_key, sign, str(nonce))

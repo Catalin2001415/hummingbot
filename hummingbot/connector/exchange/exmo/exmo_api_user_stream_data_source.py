@@ -69,8 +69,8 @@ class ExmoAPIUserStreamDataSource(UserStreamTrackerDataSource):
         Authenticates user to websocket
         """
         try:
-            auth_payload: Dict[str, Any] = self._exmo_auth.get_ws_auth_payload(exmo_utils.exmo_nonce.get_nonce())
-            await ws.send(ujson.dumps(auth_payload, escape_forward_slashes=False))
+            auth_payload: str = self._exmo_auth.get_ws_auth_payload(exmo_utils.ExmoNone.get_nonce())
+            await ws.send(auth_payload)
             auth_resp = await ws.recv()
             auth_resp: Dict[str, Any] = ujson.loads(auth_resp)
 
@@ -91,12 +91,8 @@ class ExmoAPIUserStreamDataSource(UserStreamTrackerDataSource):
         try:
             # Exmo WebSocket API currently offers only spot/user/order private channel.
             for trading_pair in self._trading_pairs:
-                params: Dict[str, Any] = {
-                    "id": 2,
-                    "method": "subscribe",
-                    "topics": ["spot/wallet", "spot/orders", "spot/user_trades"]
-                }
-                await ws.send(ujson.dumps(params))
+                params: str = """{"id":2,"method":"subscribe","topics":["spot/wallet","spot/orders","spot/user_trades"]}"""
+                await ws.send(params)
 
         except asyncio.CancelledError:
             raise
@@ -143,9 +139,10 @@ class ExmoAPIUserStreamDataSource(UserStreamTrackerDataSource):
                 async for msg in self._inner_messages(ws):
                     try:
                         msg = ujson.loads(msg)
-                        if msg is None:
-                            continue
-                        output.put_nowait(msg)
+                        if "event" in msg and msg["event"] in ["snapshot", "update"]:
+                            if msg is None:
+                                continue
+                            output.put_nowait(msg)
                     except Exception:
                         self.logger().error(
                             "Unexpected error when parsing Exmo user_stream message. ", exc_info=True
@@ -161,4 +158,4 @@ class ExmoAPIUserStreamDataSource(UserStreamTrackerDataSource):
                 if self._websocket_client is not None:
                     await self._websocket_client.close()
                     self._websocket_client = None
-                await asyncio.sleep(30.0)
+                await asyncio.sleep(1)
