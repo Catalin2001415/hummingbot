@@ -81,7 +81,7 @@ class ExmoInFlightOrder(InFlightOrderBase):
         retval.last_state = data["last_state"]
         return retval
 
-    def update_with_order_update(self, trade_update: Dict[str, Any]) -> Tuple[Decimal, Decimal, str]:
+    def update_with_trade_update(self, trade_update: Dict[str, Any]) -> bool:
         """
         Updates the in flight order with trade update from spot/user_trade message WebSocket API
         return: True if the order gets updated otherwise False

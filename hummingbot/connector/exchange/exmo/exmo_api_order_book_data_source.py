@@ -166,16 +166,17 @@ class ExmoAPIOrderBookDataSource(OrderBookTrackerDataSource):
                     if message is None or "data" not in message:
                         continue
 
-                    if "spot/trades" in message["topic"]:
-                        t_pair = exmo_utils.convert_from_exchange_trading_pair(message["topic"].split(":")[1])
-                        for msg in message["data"]:        # data is a list
-                            msg_timestamp: int = int(msg["date"])
+                    if "event" in message and message["event"] in ["snapshot", "update"]:
+                        if "spot/trades" in message["topic"]:
+                            t_pair = exmo_utils.convert_from_exchange_trading_pair(message["topic"].split(":")[1])
+                            for msg in message["data"]:        # data is a list
+                                msg_timestamp: int = int(msg["date"])
 
-                            trade_msg: OrderBookMessage = ExmoOrderBook.trade_message_from_exchange(
-                                msg=msg,
-                                timestamp=msg_timestamp,
-                                metadata={"trading_pair": t_pair})
-                            output.put_nowait(trade_msg)
+                                trade_msg: OrderBookMessage = ExmoOrderBook.trade_message_from_exchange(
+                                    msg=msg,
+                                    timestamp=msg_timestamp,
+                                    metadata={"trading_pair": t_pair})
+                                output.put_nowait(trade_msg)
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -206,16 +207,16 @@ class ExmoAPIOrderBookDataSource(OrderBookTrackerDataSource):
                     if message is None or "data" not in message:
                         continue
 
-                    msg_timestamp: int = int(message["ts"])
-                    t_pair = exmo_utils.convert_from_exchange_trading_pair(message["topic"].split(":")[1])
-
-                    if "spot/order_book_snapshots" in message["topic"]:
-                        snapshot_msg: OrderBookMessage = ExmoOrderBook.snapshot_message_from_exchange(
-                            msg=message["data"],
-                            timestamp=msg_timestamp,
-                            metadata={"trading_pair": t_pair}
-                        )
-                        output.put_nowait(snapshot_msg)
+                    if "event" in message and message["event"] in ["snapshot", "update"]:
+                        msg_timestamp: int = int(message["ts"])
+                        t_pair = exmo_utils.convert_from_exchange_trading_pair(message["topic"].split(":")[1])
+                        if "spot/order_book_snapshots" in message["topic"]:
+                            snapshot_msg: OrderBookMessage = ExmoOrderBook.snapshot_message_from_exchange(
+                                msg=message["data"],
+                                timestamp=msg_timestamp,
+                                metadata={"trading_pair": t_pair}
+                            )
+                            output.put_nowait(snapshot_msg)
             except asyncio.CancelledError:
                 raise
             except Exception:
