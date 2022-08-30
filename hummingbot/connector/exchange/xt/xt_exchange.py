@@ -2,9 +2,9 @@ import aiohttp
 import asyncio
 import copy
 import json
-import urllib
 import logging
 import math
+import base64
 from decimal import Decimal
 from typing import (
     Dict,
@@ -37,12 +37,12 @@ from hummingbot.core.event.events import (
     TradeFee
 )
 from hummingbot.connector.exchange_base import ExchangeBase
-from hummingbot.connector.exchange.exmo.exmo_order_book_tracker import ExmoOrderBookTracker
-from hummingbot.connector.exchange.exmo.exmo_user_stream_tracker import ExmoUserStreamTracker
-from hummingbot.connector.exchange.exmo.exmo_auth import ExmoAuth
-from hummingbot.connector.exchange.exmo.exmo_in_flight_order import ExmoInFlightOrder
-from hummingbot.connector.exchange.exmo import exmo_utils
-from hummingbot.connector.exchange.exmo import exmo_constants as CONSTANTS
+from hummingbot.connector.exchange.xt.xt_order_book_tracker import XtOrderBookTracker
+from hummingbot.connector.exchange.xt.xt_user_stream_tracker import XtUserStreamTracker
+from hummingbot.connector.exchange.xt.xt_auth import XtAuth
+from hummingbot.connector.exchange.xt.xt_in_flight_order import XtInFlightOrder
+from hummingbot.connector.exchange.xt import xt_utils
+from hummingbot.connector.exchange.xt import xt_constants as CONSTANTS
 from hummingbot.core.data_type.common import OpenOrder
 from hummingbot.core.api_throttler.async_throttler import AsyncThrottler
 
@@ -51,15 +51,16 @@ s_decimal_NaN = Decimal("nan")
 s_decimal_0 = Decimal(0)
 
 
-class ExmoExchange(ExchangeBase):
+class XtExchange(ExchangeBase):
     """
-    ExmoExchange connects with Exmo exchange and provides order book pricing, user account tracking and
+    XtExchange connects with XT exchange and provides order book pricing, user account tracking and
     trading functionality.
     """
     API_CALL_TIMEOUT = 10.0
-    POLL_INTERVAL = 10.0
-    UPDATE_ORDER_STATUS_MIN_INTERVAL = 10.0
-    UPDATE_TRADE_STATUS_MIN_INTERVAL = 10.0
+    POLL_INTERVAL = 1.0
+    UPDATE_ORDER_STATUS_MIN_INTERVAL = 1.0
+    UPDATE_TRADE_STATUS_MIN_INTERVAL = 1.0
+    TRADE_LOOK_BACK_INTERVAL = 5 * 60 * 1000    # milliseconds
 
     @classmethod
     def logger(cls) -> HummingbotLogger:
@@ -69,34 +70,33 @@ class ExmoExchange(ExchangeBase):
         return ctce_logger
 
     def __init__(self,
-                 exmo_api_key: str,
-                 exmo_secret_key: str,
+                 xt_api_key: str,
+                 xt_secret_key: str,
                  trading_pairs: Optional[List[str]] = None,
                  trading_required: bool = True
                  ):
         """
-        :param exmo_api_key: The API key to connect to private Exmo APIs.
-        :param exmo_secret_key: The API secret.
+        :param xt_api_key: The API key to connect to private XT APIs.
+        :param xt_secret_key: The API secret.
         :param trading_pairs: The market trading pairs which to track order book data.
         :param trading_required: Whether actual trading is needed.
         """
         super().__init__()
         self._trading_required = trading_required
         self._trading_pairs = trading_pairs
-        self._exmo_auth = ExmoAuth(api_key=exmo_api_key,
-                                         secret_key=exmo_secret_key)
+        self._xt_auth = XtAuth(api_key=xt_api_key, secret_key=xt_secret_key)
         self._throttler = AsyncThrottler(CONSTANTS.RATE_LIMITS)
-        self._order_book_tracker = ExmoOrderBookTracker(
+        self._order_book_tracker = XtOrderBookTracker(
             throttler=self._throttler, trading_pairs=trading_pairs
         )
-        self._user_stream_tracker = ExmoUserStreamTracker(
-            throttler=self._throttler, exmo_auth=self._exmo_auth, trading_pairs=trading_pairs
+        self._user_stream_tracker = XtUserStreamTracker(
+            throttler=self._throttler, xt_auth=self._xt_auth, trading_pairs=trading_pairs
         )
         self._ev_loop = asyncio.get_event_loop()
         self._shared_client = None
         self._poll_notifier = asyncio.Event()
         self._last_timestamp = 0
-        self._in_flight_orders = {}  # Dict[client_order_id:str, ExmoInFlightOrder]
+        self._in_flight_orders = {}  # Dict[client_order_id:str, XtInFlightOrder]
         self._order_not_found_records = {}  # Dict[client_order_id:str, count:int]
         self._trading_rules = {}  # Dict[trading_pair:str, TradingRule]
         self._status_polling_task = None
@@ -107,7 +107,7 @@ class ExmoExchange(ExchangeBase):
 
     @property
     def name(self) -> str:
-        return "exmo"
+        return "xt"
 
     @property
     def order_books(self) -> Dict[str, OrderBook]:
@@ -118,7 +118,7 @@ class ExmoExchange(ExchangeBase):
         return self._trading_rules
 
     @property
-    def in_flight_orders(self) -> Dict[str, ExmoInFlightOrder]:
+    def in_flight_orders(self) -> Dict[str, XtInFlightOrder]:
         return self._in_flight_orders
 
     @property
@@ -167,7 +167,7 @@ class ExmoExchange(ExchangeBase):
         :param saved_states: The saved tracking_states.
         """
         self._in_flight_orders.update({
-            key: ExmoInFlightOrder.from_json(value)
+            key: XtInFlightOrder.from_json(value)
             for key, value in saved_states.items()
         })
 
@@ -230,7 +230,7 @@ class ExmoExchange(ExchangeBase):
         the network connection. Simply ping the network (or call any light weight public API).
         """
         try:
-            await self._api_request("post", CONSTANTS.CHECK_NETWORK_PATH_URL)
+            await self._api_request("GET", CONSTANTS.CHECK_NETWORK_PATH_URL, is_auth=False)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -258,58 +258,47 @@ class ExmoExchange(ExchangeBase):
             except Exception as e:
                 self.logger().network(f"Unexpected error while fetching trading rules. Error: {str(e)}",
                                       exc_info=True,
-                                      app_warning_msg="Could not fetch new trading rules from Exmo. "
+                                      app_warning_msg="Could not fetch new trading rules from XT. "
                                                       "Check network connection.")
                 await asyncio.sleep(0.5)
 
     async def _update_trading_rules(self):
-        symbols_details = await self._api_request("post", path_url=CONSTANTS.GET_TRADING_RULES_PATH_URL)
+        market_configs = await self._api_request("GET", path_url=CONSTANTS.GET_TRADING_RULES_PATH_URL, is_auth=False)
         self._trading_rules.clear()
         self._trading_rules = self._format_trading_rules(symbols_details)
 
-    def _format_trading_rules(self, symbols_details: Dict[str, Any]) -> Dict[str, TradingRule]:
+    def _format_trading_rules(self, market_configs: Dict[str, Any]) -> Dict[str, TradingRule]:
         """
         Converts json API response into a dictionary of trading rules.
-        :param symbols_details: The json API response
+        :param market_configs: The json API response
         :return A dictionary of trading rules.
         Response Example:
         {
-            BTC_USD: {
-                min_quantity: "0.00002",
-                max_quantity: "1000",
-                min_price: "1",
-                max_price: "150000",
-                max_amount: "500000",
-                min_amount: "1",
-                price_precision: 2,
-                commission_taker_percent: "0.3",
-                commission_maker_percent: "0.3",
+            "ltc_usdt":
+            {
+                "minAmount": 0.00010,       // minimum order quantity
+                "minMoney": 5,       	    // minimum order money
+                "pricePoint": 2,            // price decimal point
+                "coinPoint": 4,             // number decimal point
+                "maker": 0.00100000,        // Active transaction fee
+                "taker": 0.00100000         // Passive transaction fee`
             },
-            ETH_USD: {
-                min_quantity: "0.0005",
-                max_quantity: "5000",
-                min_price: "0.01",
-                max_price: "100000",
-                max_amount: "500000",
-                min_amount: "1",
-                price_precision: 4,
-                commission_taker_percent: "0.3",
-                commission_maker_percent: "0.3",
-            },
+            ...
         }
         """
         result = {}
-        for symbol, rule in symbols_details.items():
+        for market, rule in market_configs:
             try:
-                trading_pair = exmo_utils.convert_from_exchange_trading_pair(symbol)
-                price_decimals = Decimal(str(rule["price_precision"]))
+                trading_pair = xt_utils.convert_from_exchange_trading_pair(market)
+                price_decimals = Decimal(str(rule["pricePoint"]))
                 # E.g. a price decimal of 2 means 0.01 incremental.
                 price_step = Decimal("1") / Decimal(str(math.pow(10, price_decimals)))
+                base_decimals = Decimal(str(rule["coinPoint"]))
+                base_step = Decimal("1") / Decimal(str(math.pow(10, base_decimals)))
                 result[trading_pair] = TradingRule(trading_pair=trading_pair,
-                                                   min_order_size=Decimal(str(rule["min_quantity"])),
-                                                   max_order_size=Decimal(str(rule["max_quantity"])),
-                                                   min_order_value=Decimal(str(rule["min_amount"])),
-                                                   min_base_amount_increment=Decimal(str(rule["min_quantity"])),
+                                                   min_order_size=Decimal(str(rule["minAmount"])),
+                                                   min_order_value=Decimal(str(rule["minMoney"])),
+                                                   min_base_amount_increment=base_step,
                                                    min_price_increment=price_step)
             except Exception:
                 self.logger().error(f"Error parsing the trading pair rule {rule}. Skipping.", exc_info=True)
@@ -318,12 +307,14 @@ class ExmoExchange(ExchangeBase):
     async def _api_request(self,
                            method: str,
                            path_url: str,
-                           params: Optional[Dict[str, Any]] = {}) -> Dict[str, Any]:
+                           params: Optional[Dict[str, Any]] = None,
+                           is_auth: bool = True) -> Dict[str, Any]:
         """
         Sends an aiohttp request and waits for a response.
         :param method: The HTTP method, e.g. get or post
         :param path_url: The path url or the API end point
         :param params: Request parameters
+        :param is_auth: A bool that says if the request needs authorization
         :returns A response in json format.
         """
         params = params or {}
@@ -331,26 +322,31 @@ class ExmoExchange(ExchangeBase):
             url = f"{CONSTANTS.REST_URL}/{path_url}"
             client = await self._http_client()
 
-            headers = self._exmo_auth.get_headers(exmo_utils.ExmoNone.get_nonce(), params)
+            if is_auth:
+                params = self._xt_auth.get_auth_dict(xt_utils.get_ms_timestamp(), params)
 
-            if method == "get":
-                get_params = urllib.parse.urlencode(params)
-                response = await client.get(url, params=get_params)
-            elif method == "post":
-                post_params = urllib.parse.urlencode(params)
-                response = await client.post(url, data=post_params, headers=headers)
+            headers = {
+                "Content-Type": 'application/x-www-form-urlencoded'
+            }
+
+            if method == "GET":
+                response = await client.get(url, params=params, headers=headers)
+            elif method == "POST":
+                post_json = json.dumps(params)
+                response = await client.post(url, data=post_json, headers=headers)
             else:
                 raise NotImplementedError
 
             try:
-                parsed_response = json.loads(await response.read())
-                if 'error' in parsed_response and "The nonce parameter is less or equal" in parsed_response['error']:
-                    parsed_response = await self._api_request(method, path_url, params)
+                parsed_response = json.loads(await response.text())
             except Exception as e:
                 raise IOError(f"Error parsing data from {url}. Error: {str(e)}")
-            if response.status != 200 or ('error' in parsed_response and parsed_response['error']):
+
+            if response.status != 200:
                 raise IOError(f"Error calling {url}. HTTP status is {response.status}. "
                               f"Message: {parsed_response}")
+            if "code" in parsed_response and int(parsed_response["code"]) not in [200, 121, 122]:
+                raise IOError(f"{url} API call failed, error message: {parsed_response}")
 
             return parsed_response
 
@@ -384,7 +380,7 @@ class ExmoExchange(ExchangeBase):
         :param price: The price (note: this is no longer optional)
         :returns A new internal order id
         """
-        order_id: str = exmo_utils.get_new_client_order_id(True, trading_pair)
+        order_id: str = xt_utils.get_new_client_order_id(True, trading_pair)
         safe_ensure_future(self._create_order(TradeType.BUY, order_id, trading_pair, amount, order_type, price))
         return order_id
 
@@ -399,7 +395,7 @@ class ExmoExchange(ExchangeBase):
         :param price: The price (note: this is no longer optional)
         :returns A new internal order id
         """
-        order_id: str = exmo_utils.get_new_client_order_id(False, trading_pair)
+        order_id: str = xt_utils.get_new_client_order_id(False, trading_pair)
         safe_ensure_future(self._create_order(TradeType.SELL, order_id, trading_pair, amount, order_type, price))
         return order_id
 
@@ -439,23 +435,23 @@ class ExmoExchange(ExchangeBase):
             if amount < trading_rule.min_order_size:
                 raise ValueError(f"Buy order amount {amount} is lower than the minimum order size "
                                  f"{trading_rule.min_order_size}.")
-            api_params = {"pair": exmo_utils.convert_to_exchange_trading_pair(trading_pair),
-                          "type": trade_type.name.lower(),
-                          "quantity": f"{amount:f}",
-                          "price": f"{price:f}",
-                          "client_id": order_id,
-                          }
+            params = {
+                "market": xt_utils.convert_to_exchange_trading_pair(trading_pair),
+                "price": float(price),
+                "number": float(amount),
+                "type": 1 if trade_type is TradeType.BUY else 0,
+                "entrustType": 0
+            }
             self.start_tracking_order(order_id,
                                       None,
                                       trading_pair,
                                       trade_type,
                                       price,
                                       amount,
-                                      order_type
-                                      )
+                                      order_type)
 
-            order_result = await self._api_request("post", CONSTANTS.CREATE_ORDER_PATH_URL, api_params)
-            exchange_order_id = str(order_result["order_id"])
+            order_result = await self._api_request("POST", CONSTANTS.CREATE_ORDER_PATH_URL, params)
+            exchange_order_id = str(order_result["data"]["id"])
             tracked_order = self._in_flight_orders.get(order_id)
             if tracked_order is not None:
                 self.logger().info(f"Created {order_type.name} {trade_type.name} order {order_id} for "
@@ -478,7 +474,7 @@ class ExmoExchange(ExchangeBase):
         except Exception as e:
             self.stop_tracking_order(order_id)
             self.logger().network(
-                f"Error submitting {trade_type.name} {order_type.name} order to Exmo for "
+                f"Error submitting {trade_type.name} {order_type.name} order to XT for "
                 f"{amount} {trading_pair} "
                 f"{price}.",
                 exc_info=True,
@@ -498,7 +494,7 @@ class ExmoExchange(ExchangeBase):
         """
         Starts tracking an order by simply adding it into _in_flight_orders dictionary.
         """
-        self._in_flight_orders[order_id] = ExmoInFlightOrder(
+        self._in_flight_orders[order_id] = XtInFlightOrder(
             client_order_id=order_id,
             exchange_order_id=exchange_order_id,
             trading_pair=trading_pair,
@@ -530,30 +526,26 @@ class ExmoExchange(ExchangeBase):
             if tracked_order.exchange_order_id is None:
                 await tracked_order.get_exchange_order_id()
             ex_order_id = tracked_order.exchange_order_id
-            response = await self._api_request(
-                "post",
-                CONSTANTS.CANCEL_ORDER_PATH_URL,
-                {"order_id": int(ex_order_id)}
-            )
 
-            # result = True is a successful cancel, False indicates cancel failed due to already cancelled or matched
-            if "result" in response and not response["result"]:
-                raise ValueError(f"Failed to cancel order - {order_id}. Order was already matched or cancelled on the exchange.")
-
-            order_msg = {
-                "order_id": ex_order_id,
-                "status": "cancelled",
-                "quantity": "0.1"   # any quantity above 0 will work, to process it as a user cancelled order and not a filled order.
+            params = {
+                "market":   xt_utils.convert_to_exchange_trading_pair(trading_pair),
+                "id":       int(ex_order_id)
             }
-            await self._process_order_message(order_msg)
-            return order_id
+
+            response = await self._api_request("POST", CONSTANTS.CANCEL_ORDER_PATH_URL, params)
+
+            # code in {200, 121, 122} is a successful cancel, code in {123, 124} is a failed cancellation
+            if int(response["code"]) in [200, 121, 122]:
+                return order_id
+            else:
+                raise ValueError(f"Failed to cancel order - {order_id}. cancellation Message: {response}.")
         except asyncio.CancelledError:
             raise
         except Exception as e:
             self.logger().network(
                 f"Failed to cancel order {order_id}: {str(e)}",
                 exc_info=True,
-                app_warning_msg=f"Failed to cancel the order {order_id} on Exmo. "
+                app_warning_msg=f"Failed to cancel the order {order_id} on Xt. "
                                 f"Check API key and network connection."
             )
 
@@ -568,6 +560,7 @@ class ExmoExchange(ExchangeBase):
                 await safe_gather(
                     self._update_balances(),
                     self._update_trade_status(),
+                    self._update_order_status(),
                 )
                 self._last_poll_timestamp = self.current_timestamp
                 self._poll_notifier.clear()
@@ -577,7 +570,7 @@ class ExmoExchange(ExchangeBase):
                 self.logger().error(str(e), exc_info=True)
                 self.logger().network("Unexpected error while fetching account updates.",
                                       exc_info=True,
-                                      app_warning_msg="Could not fetch account updates from Exmo. "
+                                      app_warning_msg="Could not fetch account updates from XT. "
                                                       "Check API key and network connection.")
                 await asyncio.sleep(0.5)
 
@@ -587,47 +580,11 @@ class ExmoExchange(ExchangeBase):
         """
         local_asset_names = set(self._account_balances.keys())
         remote_asset_names = set()
-        account_info = await self._api_request("post", CONSTANTS.GET_ACCOUNT_SUMMARY_PATH_URL, {})
-        self._process_balance_snapshot(account_info)
-
-        self._in_flight_orders_snapshot = {k: copy.copy(v) for k, v in self._in_flight_orders.items()}
-        self._in_flight_orders_snapshot_timestamp = self.current_timestamp
-
-    async def _update_trade_status(self):
-        """
-        Calls REST API to get status update for user trades.
-        """
-        last_tick = int(self._last_poll_timestamp / self.UPDATE_ORDER_STATUS_MIN_INTERVAL)
-        current_tick = int(self.current_timestamp / self.UPDATE_ORDER_STATUS_MIN_INTERVAL)
-
-        if current_tick > last_tick and len(self._in_flight_orders) > 0:
-            if len(self._in_flight_orders) > 0:
-                trading_pairs_set = set()
-                for o in self._in_flight_orders.values():
-                    trading_pairs_set.add(o.trading_pair)
-
-            tasks = []
-            for trading_pair in trading_pairs_set:
-                tasks.append(self._api_request("post",
-                                               CONSTANTS.GET_TRADE_DETAIL_PATH_URL,
-                                               {"pair": exmo_utils.convert_to_exchange_trading_pair(trading_pair)}
-                                               ))
-            self.logger().debug(f"Polling for order status updates of {len(tasks)} orders.")
-            responses = await safe_gather(*tasks, return_exceptions=True)
-            for response in responses:
-                if isinstance(response, Exception):
-                    raise response
-                for pair, trade_list in response.items():
-                    for trade_msg in trade_list:
-                        await self._process_trade_message(trade_msg)
-
-    def _process_balance_snapshot(self, account_info: Dict[str, Any]):
-        local_asset_names = set(self._account_balances.keys())
-        remote_asset_names = set()
-
-        for asset_name in account_info["balances"].keys():
-            self._account_available_balances[asset_name] = Decimal(str(account_info["balances"][asset_name]))
-            self._account_balances[asset_name] = Decimal(str(account_info["balances"][asset_name])) + Decimal(str(account_info["reserved"][asset_name]))
+        account_info = await self._api_request("GET", CONSTANTS.GET_ACCOUNT_SUMMARY_PATH_URL)
+        for asset, account in account_info["data"].items():
+            asset_name = asset.upper()
+            self._account_available_balances[asset_name] = Decimal(str(account["available"])) - Decimal(str(account["freeze"]))
+            self._account_balances[asset_name] = Decimal(str(account["available"]))
             remote_asset_names.add(asset_name)
 
         asset_names_to_remove = local_asset_names.difference(remote_asset_names)
@@ -635,14 +592,106 @@ class ExmoExchange(ExchangeBase):
             del self._account_available_balances[asset_name]
             del self._account_balances[asset_name]
 
+        self._in_flight_orders_snapshot = {k: copy.copy(v) for k, v in self._in_flight_orders.items()}
+        self._in_flight_orders_snapshot_timestamp = self.current_timestamp
+
+    async def _update_order_status(self):
+        """
+        Calls REST API to get status update for each in-flight order.
+        """
+        last_tick = int(self._last_poll_timestamp / self.UPDATE_ORDER_STATUS_MIN_INTERVAL)
+        current_tick = int(self.current_timestamp / self.UPDATE_ORDER_STATUS_MIN_INTERVAL)
+
+        if current_tick > last_tick and len(self._in_flight_orders) > 0:
+
+            if self._trading_pairs is None:
+                raise Exception("_update_order_status can only be used when trading_pairs are specified.")
+            for order in self._in_flight_orders.values():
+                await order.get_exchange_order_id()
+            tracked_orders: Dict[str, XtInFlightOrder] = self._in_flight_orders.copy().items()
+            cancellation_results = []
+
+            batch_size = 100
+            orders = tracked_orders.values()
+            tasks = []
+            for trading_pair in self._trading_pairs:
+
+                orders = [order for order in orders if order.trading_pair == trading_pair]
+                order_chunks = []
+
+                for i in range(0, len(orders), batch_size):
+                    order_chunks.append(orders[i:i+batch_size])
+
+                for chunk in order_chunks:
+
+                    data = [int(order.exchange_order_id) for order in chunk]
+                    data = json.dumps(data)
+                    data = base64.b64encode(data.encode('utf-8'))
+
+                    params = {
+                        "market": xt_utils.convert_to_exchange_trading_pair(orders[0].trading_pair),
+                        "data": str(data, 'utf-8')
+                    }
+
+                    tasks.append(self._api_request("GET", CONSTANTS.GET_ORDER_DETAIL_PATH_URL, params))
+
+            self.logger().debug(f"Polling for order status updates.")
+            responses = await safe_gather(*tasks, return_exceptions=True)
+            for response in responses:
+                if isinstance(response, Exception):
+                    raise response
+                if "data" not in response:
+                    self.logger().info(f"_update_order_status data not in resp: {response}")
+                    continue
+                orders = response["data"]
+                for order in orders:
+                    await self._process_order_message(order)
+
+    async def _update_trade_status(self):
+        """
+        Calls REST API to get trade updates in the last TRADE_LOOK_BACK_INTERVAL milliseconds.
+        """
+        last_tick = int(self._last_poll_timestamp / self.UPDATE_ORDER_STATUS_MIN_INTERVAL)
+        current_tick = int(self.current_timestamp / self.UPDATE_ORDER_STATUS_MIN_INTERVAL)
+
+        if current_tick > last_tick and len(self._in_flight_orders) > 0:
+
+            if self._trading_pairs is None:
+                raise Exception("_update_order_status can only be used when trading_pairs are specified.")
+
+            tasks = []
+            for trading_pair in self._trading_pairs:
+
+                curr_time = int(time.time() * 1000)
+                params = {
+                    "market":       xt_utils.convert_to_exchange_trading_pair(orders[0].trading_pair),
+                    "startTime":    curr_time - self.TRADE_LOOK_BACK_INTERVAL,
+                    "endTime":      curr_time
+                }
+
+                tasks.append(self._api_request("GET", CONSTANTS.GET_TRADE_DETAIL_PATH_URL, params))
+
+            self.logger().debug(f"Polling for trade status updates.")
+            responses = await safe_gather(*tasks, return_exceptions=True)
+            for response in responses:
+                if isinstance(response, Exception):
+                    raise response
+                if "data" not in response:
+                    self.logger().info(f"_update_trade_status data not in resp: {response}")
+                    continue
+                trades = response["data"]
+                for trade in orders:
+                    await self._process_trade_message_from_trade_status(trade)
+
+
     async def _process_order_message(self, order_msg: Dict[str, Any]):
         """
-        Updates in-flight order and triggers cancellation or failure event if needed.
+        Updates in-flight order and triggers cancellation or failure event if needed. Sends message to process trade-fills if order completes.
         :param order_msg: The order response from either REST or web socket API (they are of the same format)
         """
         for order in self._in_flight_orders.values():
             await order.get_exchange_order_id()
-        exchange_order_id = str(order_msg["order_id"])
+        exchange_order_id = str(order_msg["id"])
         tracked_orders = list(self._in_flight_orders.values())
         tracked_order = [order for order in tracked_orders if exchange_order_id == order.exchange_order_id]
         if not tracked_order:
@@ -651,10 +700,7 @@ class ExmoExchange(ExchangeBase):
         client_order_id = tracked_order.client_order_id
 
         # Update order execution status
-        if ("status" in order_msg and order_msg["status"] == "cancelled") and Decimal(str(order_msg["quantity"])) != Decimal("0"):
-            tracked_order.last_state = "CANCELED"
-        elif "status" in order_msg and order_msg["status"] in ["open", "executing"]:
-            tracked_order.last_state = "ACTIVE"
+        tracked_order.last_state = CONSTANTS.ORDER_STATUS[int(order_msg["status"])]
 
         if tracked_order.is_cancelled:
             self.logger().info(f"Successfully cancelled order {client_order_id}.")
@@ -664,6 +710,8 @@ class ExmoExchange(ExchangeBase):
                                    client_order_id))
             tracked_order.cancelled_event.set()
             self.stop_tracking_order(client_order_id)
+        elif tracked_order.is_done:
+            await self._process_trade_message_from_order_status(order_msg)
         elif tracked_order.is_failure:
             self.logger().info(f"The market order {client_order_id} has failed according to order status API. ")
             self.trigger_event(MarketEvent.OrderFailure,
@@ -674,19 +722,20 @@ class ExmoExchange(ExchangeBase):
                                ))
             self.stop_tracking_order(client_order_id)
 
-    async def _process_trade_message(self, trade_msg: Dict[str, Any]):
+    async def _process_trade_message_from_order_status(self, order_msg: Dict[str, Any]):
         """
-        Updates in-flight order and trigger order filled event for order message received from WebSocket API. Triggers order completed
+        Updates in-flight order and trigger order filled event for order message received from Order Status REST API. Triggers order completed
         event if the total executed amount equals to the specified order amount.
         """
         for order in self._in_flight_orders.values():
             await order.get_exchange_order_id()
-        track_order = [o for o in self._in_flight_orders.values() if str(trade_msg["order_id"]) == o.exchange_order_id]
-        if not track_order:
+        tracked_orders = list(self._in_flight_orders.values())
+        tracked_order = [o for o in tracked_orders if str(order_msg["id"]) == o.exchange_order_id]
+        if not tracked_order:
             return
-        tracked_order = track_order[0]
-        updated = tracked_order.update_with_trade_update(trade_msg)
-        if not updated:
+        tracked_order = tracked_order[0]
+        (delta_trade_amount, delta_trade_price, delta_trade_fee, trade_id) = tracked_order.update_with_order_status(order_msg)
+        if not delta_trade_amount:
             return
         self.trigger_event(
             MarketEvent.OrderFilled,
@@ -696,17 +745,67 @@ class ExmoExchange(ExchangeBase):
                 tracked_order.trading_pair,
                 tracked_order.trade_type,
                 tracked_order.order_type,
-                Decimal(str(trade_msg["price"])),
-                Decimal(str(trade_msg["quantity"])),
-                TradeFee(0.0, [(trade_msg["commission_currency"], Decimal(str(trade_msg["commission_amount"])))]),
-                exchange_trade_id=trade_msg["trade_id"]
+                delta_trade_price,
+                delta_trade_amount,
+                TradeFee(0.0, [(tracked_order.fee_asset, float(delta_trade_fee))]),
+                exchange_trade_id=trade_id
             )
         )
         if math.isclose(tracked_order.executed_amount_base, tracked_order.amount) or tracked_order.executed_amount_base >= tracked_order.amount:
             tracked_order.last_state = "FILLED"
             self.logger().info(f"The {tracked_order.trade_type.name} order "
                                f"{tracked_order.client_order_id} has completed "
-                               f"according to trade status ws API.")
+                               f"according to Order Status REST API.")
+            event_tag = MarketEvent.BuyOrderCompleted if tracked_order.trade_type is TradeType.BUY \
+                else MarketEvent.SellOrderCompleted
+            event_class = BuyOrderCompletedEvent if tracked_order.trade_type is TradeType.BUY \
+                else SellOrderCompletedEvent
+            self.trigger_event(event_tag,
+                               event_class(self.current_timestamp,
+                                           tracked_order.client_order_id,
+                                           tracked_order.base_asset,
+                                           tracked_order.quote_asset,
+                                           tracked_order.fee_asset,
+                                           tracked_order.executed_amount_base,
+                                           tracked_order.executed_amount_quote,
+                                           tracked_order.fee_paid,
+                                           tracked_order.order_type))
+            self.stop_tracking_order(tracked_order.client_order_id)
+
+    async def _process_trade_message_from_trade_status(self, trade_msg: Dict[str, Any]):
+        """
+        Updates in-flight order and trigger order filled event for trade message received from Trade Status REST API. Triggers order completed
+        event if the total executed amount equals to the specified order amount.
+        """
+        for order in self._in_flight_orders.values():
+            await order.get_exchange_order_id()
+        tracked_orders = list(self._in_flight_orders.values())
+        tracked_order = [o for o in tracked_orders if str(trade_msg["orderId"]) == o.exchange_order_id]
+        if not tracked_order:
+            return
+        tracked_order = tracked_order[0]
+        (delta_trade_amount, delta_trade_price, delta_trade_fee, trade_id) = tracked_order.update_with_trade_status(trade_msg)
+        if not delta_trade_amount:
+            return
+        self.trigger_event(
+            MarketEvent.OrderFilled,
+            OrderFilledEvent(
+                self.current_timestamp,
+                tracked_order.client_order_id,
+                tracked_order.trading_pair,
+                tracked_order.trade_type,
+                tracked_order.order_type,
+                delta_trade_price,
+                delta_trade_amount,
+                TradeFee(0.0, [(tracked_order.fee_asset, float(delta_trade_fee))]),
+                exchange_trade_id=trade_id
+            )
+        )
+        if math.isclose(tracked_order.executed_amount_base, tracked_order.amount) or tracked_order.executed_amount_base >= tracked_order.amount:
+            tracked_order.last_state = "FILLED"
+            self.logger().info(f"The {tracked_order.trade_type.name} order "
+                               f"{tracked_order.client_order_id} has completed "
+                               f"according to Trade Status REST API.")
             event_tag = MarketEvent.BuyOrderCompleted if tracked_order.trade_type is TradeType.BUY \
                 else MarketEvent.SellOrderCompleted
             event_class = BuyOrderCompletedEvent if tracked_order.trade_type is TradeType.BUY \
@@ -730,30 +829,54 @@ class ExmoExchange(ExchangeBase):
         :param timeout_seconds: The timeout at which the operation will be canceled.
         :returns List of CancellationResult which indicates whether each order is successfully cancelled.
         """
-        incomplete_orders = [o for o in self.in_flight_orders.values() if not o.is_done]
-        tasks = [self._execute_cancel(o.trading_pair, o.client_order_id) for o in incomplete_orders]
-        order_id_set = set([o.client_order_id for o in incomplete_orders])
-        successful_cancellations = []
+        if self._trading_pairs is None:
+            raise Exception("cancel_all can only be used when trading_pairs are specified.")
+        for order in self._in_flight_orders.values():
+            await order.get_exchange_order_id()
+        tracked_orders: Dict[str, XtInFlightOrder] = self._in_flight_orders.copy().items()
+        cancellation_results = []
 
         try:
-            # async with timeout(timeout_seconds):
-            cancellation_results = await safe_gather(*tasks, return_exceptions=True)
-            for cr in cancellation_results:
-                if isinstance(cr, Exception):
-                    continue
-                if isinstance(cr, str):
-                    client_order_id = cr
-                    order_id_set.remove(client_order_id)
-                    successful_cancellations.append(CancellationResult(client_order_id, True))
+            batch_size = 100
+            orders = tracked_orders.values()
+            for trading_pair in self._trading_pairs:
+
+                orders = [order for order in orders if order.trading_pair == trading_pair]
+                order_chunks = []
+
+                for i in range(0, len(orders), batch_size):
+                    order_chunks.append(orders[i:i+batch_size])
+
+                for chunk in order_chunks:
+
+                    data = [int(order.exchange_order_id) for order in chunk]
+                    data = json.dumps(data)
+                    data = base64.b64encode(data.encode('utf-8'))
+
+                    params = {
+                        "market": xt_utils.convert_to_exchange_trading_pair(orders[0].trading_pair),
+                        "data": str(data, 'utf-8')
+                    }
+
+                    await self._api_request("GET", CONSTANTS.BATCH_CANCEL_ORDER_PATH_URL, params)
+
+            open_orders = await self.get_open_orders()
+            for cl_order_id, tracked_order in tracked_orders:
+                open_order = [o for o in open_orders if o.client_order_id == cl_order_id]
+                if not open_order:
+                    cancellation_results.append(CancellationResult(cl_order_id, True))
+                    self.trigger_event(MarketEvent.OrderCancelled,
+                                       OrderCancelledEvent(self.current_timestamp, cl_order_id))
+                    self.stop_tracking_order(cl_order_id)
+                else:
+                    cancellation_results.append(CancellationResult(cl_order_id, False))
         except Exception:
             self.logger().network(
-                "Unexpected error cancelling orders.",
+                "Failed to cancel all orders.",
                 exc_info=True,
-                app_warning_msg="Failed to cancel order with Binance. Check API key and network connection."
+                app_warning_msg="Failed to cancel all orders on XT. Check API key and network connection."
             )
-
-        failed_cancellations = [CancellationResult(oid, False) for oid in order_id_set]
-        return successful_cancellations + failed_cancellations
+        return cancellation_results
 
     def tick(self, timestamp: float):
         """
@@ -783,44 +906,87 @@ class ExmoExchange(ExchangeBase):
         return TradeFee(percent=self.estimate_fee_pct(is_maker))
 
     async def _iter_user_event_queue(self) -> AsyncIterable[Dict[str, any]]:
-        while True:
-            try:
-                yield await self._user_stream_tracker.user_stream.get()
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                self.logger().network(
-                    "Unknown error. Retrying after 1 seconds.",
-                    exc_info=True,
-                    app_warning_msg="Could not fetch user events from Exmo. Check API key and network connection."
-                )
-                await asyncio.sleep(1.0)
+        # while True:
+        #     try:
+        #         yield await self._user_stream_tracker.user_stream.get()
+        #     except asyncio.CancelledError:
+        #         raise
+        #     except Exception:
+        #         self.logger().network(
+        #             "Unknown error. Retrying after 1 seconds.",
+        #             exc_info=True,
+        #             app_warning_msg="Could not fetch user events from Xt. Check API key and network connection."
+        #         )
+        #         await asyncio.sleep(1.0)
+        pass
 
     async def _user_stream_event_listener(self):
         """
         Listens to message in _user_stream_tracker.user_stream queue. The messages are put in by
-        ExmoAPIUserStreamDataSource.
+        XtAPIUserStreamDataSource.
         """
-        async for event_message in self._iter_user_event_queue():
-            try:
-                event_type = event_message.get("topic")
-                if event_type == "spot/wallet":
-                    if event_message["event"] == "snapshot":
-                        self._process_balance_snapshot(event_message["data"])
-                    elif event_message["event"] == "update":
-                        asset_name = event_message["data"]["currency"]
-                        self._account_available_balances[asset_name] = Decimal(str(event_message["data"]["balance"]))
-                        self._account_balances[asset_name] = Decimal(str(event_message["data"]["balance"])) + Decimal(str(event_message["data"]["reserved"]))
-                elif event_type == "spot/user_trades":
-                    await self._process_trade_message(event_message["data"])
-                elif event_type == "spot/orders":
-                    if event_message["event"] == "snapshot":
-                        for order_msg in event_message["data"]:
-                            await self._process_order_message(order_msg)
-                    elif event_message["event"] == "update":
-                        await self._process_order_message(event_message["data"])
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                self.logger().error("Unexpected error in user stream listener loop.", exc_info=True)
-                await asyncio.sleep(5.0)
+        # async for event_message in self._iter_user_event_queue():
+        #     try:
+        #         if "data" not in event_message:
+        #             continue
+        #         for msg in event_message["data"]:     # data is a list
+        #             await self._process_order_message(msg)
+        #             await self._process_trade_message_ws(msg)
+        #     except asyncio.CancelledError:
+        #         raise
+        #     except Exception:
+        #         self.logger().error("Unexpected error in user stream listener loop.", exc_info=True)
+        #         await asyncio.sleep(5.0)
+        pass
+
+    async def get_open_orders(self) -> List[OpenOrder]:
+        if self._trading_pairs is None:
+            raise Exception("get_open_orders can only be used when trading_pairs are specified.")
+
+        page_size = 1000
+        responses = []
+        for trading_pair in self._trading_pairs:
+            page = 1
+            while True:
+                params = {
+                    "market":   xt_utils.convert_to_exchange_trading_pair(trading_pair),
+                    "page":     page,
+                    "pageSize": page_size
+                }
+                response = await self._api_request("GET", CONSTANTS.GET_OPEN_ORDERS_PATH_URL, params)
+                responses.append(response)
+                count = len(response["data"])
+                if count < page_len:
+                    break
+                else:
+                    page += 1
+
+        for order in self._in_flight_orders.values():
+            await order.get_exchange_order_id()
+
+        ret_val = []
+        for response in responses:
+            for order in response["data"]:
+                exchange_order_id = str(order["id"])
+                tracked_orders = list(self._in_flight_orders.values())
+                tracked_order = [o for o in tracked_orders if exchange_order_id == o.exchange_order_id]
+                if not tracked_order:
+                    continue
+                tracked_order = tracked_order[0]
+                if int(order["entrustType"]) != 0:
+                    raise Exception(f"Unsupported order type {order['entrustType']}. Only LIMIT orders are supported.")
+                ret_val.append(
+                    OpenOrder(
+                        client_order_id=tracked_order.client_order_id,
+                        trading_pair=tracked_order.trading_pair,
+                        price=Decimal(str(order["price"])),
+                        amount=Decimal(str(order["number"])),
+                        executed_amount=Decimal(str(order["completeNumber"])),
+                        status="ACTIVE",
+                        order_type=OrderType.LIMIT,
+                        is_buy=True if int(order["type"]) == 1 else False,
+                        time=int(order["time"]),
+                        exchange_order_id=str(order["id"])
+                    )
+                )
+        return ret_val

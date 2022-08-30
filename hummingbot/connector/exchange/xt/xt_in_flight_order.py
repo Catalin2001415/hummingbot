@@ -11,10 +11,10 @@ from hummingbot.core.event.events import (
     TradeType
 )
 from hummingbot.connector.in_flight_order_base import InFlightOrderBase
-from hummingbot.connector.exchange.exmo import exmo_utils
+from hummingbot.connector.exchange.xt import xt_utils
 
 
-class ExmoInFlightOrder(InFlightOrderBase):
+class XtInFlightOrder(InFlightOrderBase):
     def __init__(self,
                  client_order_id: str,
                  exchange_order_id: Optional[str],
@@ -64,7 +64,7 @@ class ExmoInFlightOrder(InFlightOrderBase):
         :param data: json data from API
         :return: formatted InFlightOrder
         """
-        retval = ExmoInFlightOrder(
+        retval = XtInFlightOrder(
             data["client_order_id"],
             data["exchange_order_id"],
             data["trading_pair"],
@@ -81,21 +81,55 @@ class ExmoInFlightOrder(InFlightOrderBase):
         retval.last_state = data["last_state"]
         return retval
 
-    def update_with_trade_update(self, trade_update: Dict[str, Any]) -> bool:
+    def update_with_order_status(self, order_update: Dict[str, Any]) -> Tuple[Decimal, Decimal, str]:
         """
-        Updates the in flight order with trade update from spot/user_trade message WebSocket API
-        return: True if the order gets updated otherwise False
+        Updates the in flight order with order message from order-status REST API
+        :return: tuple of trade amount, trade price, trade fee, trade ID if the order gets updated
         """
-        trade_id = trade_update["trade_id"]
-        if str(trade_update["order_id"]) != self.exchange_order_id or trade_id in self.trade_id_set:
-            # trade already recorded
-            return False
+        s_decimal_0 = Decimal(0)
+
+        if Decimal(order_update["completeNumber"]) <= self.executed_amount_base:
+            return (s_decimal_0, s_decimal_0, s_decimal_0, "")
+
+        trade_id = f"{order_update['id']}-{int(time.time() * 1000)}"
         self.trade_id_set.add(trade_id)
-        self.executed_amount_base += Decimal(trade_update["quantity"])
-        self.executed_amount_quote += Decimal(trade_update["amount"])
-        self.fee_paid += Decimal(str(trade_update["commission_amount"]))
+
+        executed_amount_base = Decimal(order_update["completeNumber"])
+        executed_amount_quote = abs(Decimal(order_update["completeMoney"]))
+        fee_paid = Decimal(order_update["fee"])
+        delta_trade_amount = executed_amount_base - self.executed_amount_base
+        delta_trade_price = Decimal(order_update["avgPrice"])
+        self.executed_amount_base = executed_amount_base
+        self.executed_amount_quote = executed_amount_quote
+        delta_trade_fee = fee_paid - self.fee_paid
+        self.fee_paid = fee_paid
 
         if not self.fee_asset:
-            self.fee_asset = trade_update["commission_currency"]
+            self.fee_asset = self.quote_asset
 
-        return True
+        return (delta_trade_amount, delta_trade_price, delta_trade_fee, trade_id)
+
+    def update_with_trade_status(self, trade_update: Dict[str, Any]) -> Tuple[Decimal, Decimal, str]:
+        """
+        Updates the in flight order with trade message from trade-status REST API
+        :return: tuple of trade amount, trade price, trade fee, trade ID if the order gets updated
+        """
+        s_decimal_0 = Decimal(0)
+
+        trade_id = str(trade_update["id"])
+        if trade_id in self.trade_id_set:
+            return (s_decimal_0, s_decimal_0, s_decimal_0, "")
+
+        self.trade_id_set.add(trade_id)
+
+        delta_trade_amount = Decimal(trade_update["amount"])
+        delta_trade_price = Decimal(str(trade_update["price"]))
+        delta_trade_fee = Decimal(str(trade_update["fee"]))
+        self.executed_amount_base += delta_trade_amount
+        self.executed_amount_quote += abs(Decimal(str(trade_update["value"])))
+        self.fee_paid += delta_trade_fee
+
+        if not self.fee_asset:
+            self.fee_asset = self.quote_asset
+
+        return (delta_trade_amount, delta_trade_price, delta_trade_fee, trade_id)

@@ -12,11 +12,11 @@ from hummingbot.client.config.config_methods import using_exchange
 
 CENTRALIZED = True
 
-EXAMPLE_PAIR = "BTC-USD"
+EXAMPLE_PAIR = "ETH-USDT"
 
-DEFAULT_FEES = [0.4, 0.4]
+DEFAULT_FEES = [0.25, 0.25]
 
-HBOT_BROKER_ID = "exmo-"
+HBOT_BROKER_ID = "xt-"
 
 
 # deeply merge two dictionaries
@@ -52,13 +52,14 @@ def convert_snapshot_message_to_order_book_row(message: OrderBookMessage) -> Tup
     data = message.content
     bids, asks = [], []
 
+
     bids = [
-        OrderBookRow(float(bid[0]), float(bid[1]), update_id) for bid in data["bid"]
+        OrderBookRow(float(bid[0]), float(bid[1]), update_id) for bid in data["bids"]
     ]
     sorted(bids, key=lambda a: a.price)
 
     asks = [
-        OrderBookRow(float(ask[0]), float(ask[1]), update_id) for ask in data["ask"]
+        OrderBookRow(float(ask[0]), float(ask[1]), update_id) for ask in data["asks"]
     ]
     sorted(asks, key=lambda a: a.price)
 
@@ -71,56 +72,60 @@ def convert_diff_message_to_order_book_row(message: OrderBookMessage) -> Tuple[L
     bids, asks = [], []
 
     bids = [
-        OrderBookRow(float(bid[0]), float(bid[1]), update_id) for bid in data["bid"]
+        OrderBookRow(float(bid[0]), float(bid[1]), update_id) for bid in data["bids"]
     ]
     sorted(bids, key=lambda a: a.price)
 
     asks = [
-        OrderBookRow(float(ask[0]), float(ask[1]), update_id) for ask in data["ask"]
+        OrderBookRow(float(ask[0]), float(ask[1]), update_id) for ask in data["asks"]
     ]
     sorted(asks, key=lambda a: a.price)
 
     return bids, asks
 
 
-# Nonce class
-class ExmoNone:
+# Request ID class
+class RequestId:
     """
-    Generate unique nonces
+    Generate request ids
     """
     _request_id: int = 0
 
     @classmethod
-    def get_nonce(cls) -> int:
+    def generate_request_id(cls) -> int:
         return get_tracking_nonce()
 
 
-exmo_nonce = ExmoNone()
-
 def convert_from_exchange_trading_pair(exchange_trading_pair: str) -> str:
-    return exchange_trading_pair.replace("_", "-")
+    return exchange_trading_pair.replace("_", "-").upper()
 
 
 def convert_to_exchange_trading_pair(hb_trading_pair: str) -> str:
-    return hb_trading_pair.replace("-", "_")
+    return hb_trading_pair.replace("-", "_").lower()
 
 
 def get_new_client_order_id(is_buy: bool, trading_pair: str) -> str:
-    return f"{get_tracking_nonce()}"
+    side = "B" if is_buy else "S"
+    return f"{HBOT_BROKER_ID}{side}-{trading_pair}-{get_tracking_nonce()}"
 
+
+# Decompress WebSocket messages
+def decompress_ws_message(message):
+    bytes = gzip.decompress(message)
+    return str(bytes, encoding="utf8")
 
 
 KEYS = {
-    "exmo_api_key":
-        ConfigVar(key="exmo_api_key",
-                  prompt="Enter your Exmo API key >>> ",
-                  required_if=using_exchange("exmo"),
+    "xt_api_key":
+        ConfigVar(key="xt_api_key",
+                  prompt="Enter your XT API key >>> ",
+                  required_if=using_exchange("xt"),
                   is_secure=True,
                   is_connect_key=True),
-    "exmo_secret_key":
-        ConfigVar(key="exmo_secret_key",
-                  prompt="Enter your Exmo secret key >>> ",
-                  required_if=using_exchange("exmo"),
+    "xt_secret_key":
+        ConfigVar(key="xt_secret_key",
+                  prompt="Enter your XT secret key >>> ",
+                  required_if=using_exchange("xt"),
                   is_secure=True,
                   is_connect_key=True),
 }

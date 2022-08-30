@@ -2,20 +2,20 @@
 import asyncio
 import bisect
 import logging
-import hummingbot.connector.exchange.exmo.exmo_constants as constants
+import hummingbot.connector.exchange.xt.xt_constants as constants
 from collections import defaultdict, deque
 from typing import Optional, Dict, List, Deque
 from hummingbot.core.data_type.order_book_message import OrderBookMessageType
 from hummingbot.logger import HummingbotLogger
 from hummingbot.core.data_type.order_book_tracker import OrderBookTracker
-from hummingbot.connector.exchange.exmo import exmo_utils
-from hummingbot.connector.exchange.exmo.exmo_order_book_message import ExmoOrderBookMessage
-from hummingbot.connector.exchange.exmo.exmo_api_order_book_data_source import ExmoAPIOrderBookDataSource
-from hummingbot.connector.exchange.exmo.exmo_order_book import ExmoOrderBook
+from hummingbot.connector.exchange.xt import xt_utils
+from hummingbot.connector.exchange.xt.xt_order_book_message import XtOrderBookMessage
+from hummingbot.connector.exchange.xt.xt_api_order_book_data_source import XtAPIOrderBookDataSource
+from hummingbot.connector.exchange.xt.xt_order_book import XtOrderBook
 from hummingbot.core.api_throttler.async_throttler import AsyncThrottler
 
 
-class ExmoOrderBookTracker(OrderBookTracker):
+class XtOrderBookTracker(OrderBookTracker):
     _logger: Optional[HummingbotLogger] = None
 
     @classmethod
@@ -25,7 +25,7 @@ class ExmoOrderBookTracker(OrderBookTracker):
         return cls._logger
 
     def __init__(self, throttler: Optional[AsyncThrottler] = None, trading_pairs: Optional[List[str]] = None):
-        super().__init__(ExmoAPIOrderBookDataSource(throttler, trading_pairs), trading_pairs)
+        super().__init__(XtAPIOrderBookDataSource(throttler, trading_pairs), trading_pairs)
 
         self._ev_loop: asyncio.BaseEventLoop = asyncio.get_event_loop()
         self._order_book_snapshot_stream: asyncio.Queue = asyncio.Queue()
@@ -33,8 +33,8 @@ class ExmoOrderBookTracker(OrderBookTracker):
         self._order_book_trade_stream: asyncio.Queue = asyncio.Queue()
         self._process_msg_deque_task: Optional[asyncio.Task] = None
         self._past_diffs_windows: Dict[str, Deque] = {}
-        self._order_books: Dict[str, ExmoOrderBook] = {}
-        self._saved_message_queues: Dict[str, Deque[ExmoOrderBookMessage]] = \
+        self._order_books: Dict[str, XtOrderBook] = {}
+        self._saved_message_queues: Dict[str, Deque[XtOrderBookMessage]] = \
             defaultdict(lambda: deque(maxlen=1000))
         self._order_book_stream_listener_task: Optional[asyncio.Task] = None
         self._order_book_trade_listener_task: Optional[asyncio.Task] = None
@@ -50,16 +50,16 @@ class ExmoOrderBookTracker(OrderBookTracker):
         """
         Update an order book with changes from the latest batch of received messages
         """
-        past_diffs_window: Deque[ExmoOrderBookMessage] = deque()
+        past_diffs_window: Deque[XtOrderBookMessage] = deque()
         self._past_diffs_windows[trading_pair] = past_diffs_window
 
         message_queue: asyncio.Queue = self._tracking_message_queues[trading_pair]
-        order_book: ExmoOrderBook = self._order_books[trading_pair]
+        order_book: XtOrderBook = self._order_books[trading_pair]
 
         while True:
             try:
-                message: ExmoOrderBookMessage = None
-                saved_messages: Deque[ExmoOrderBookMessage] = self._saved_message_queues[trading_pair]
+                message: XtOrderBookMessage = None
+                saved_messages: Deque[XtOrderBookMessage] = self._saved_message_queues[trading_pair]
                 # Process saved messages first if there are any
                 if len(saved_messages) > 0:
                     message = saved_messages.popleft()
@@ -67,14 +67,14 @@ class ExmoOrderBookTracker(OrderBookTracker):
                     message = await message_queue.get()
 
                 if message.type is OrderBookMessageType.SNAPSHOT:
-                    past_diffs: List[ExmoOrderBookMessage] = list(past_diffs_window)
+                    past_diffs: List[XtOrderBookMessage] = list(past_diffs_window)
                     # only replay diffs later than snapshot, first update active order with snapshot then replay diffs
                     replay_position = bisect.bisect_right(past_diffs, message)
                     replay_diffs = past_diffs[replay_position:]
-                    s_bids, s_asks = exmo_utils.convert_snapshot_message_to_order_book_row(message)
+                    s_bids, s_asks = xt_utils.convert_snapshot_message_to_order_book_row(message)
                     order_book.apply_snapshot(s_bids, s_asks, message.update_id)
                     for diff_message in replay_diffs:
-                        d_bids, d_asks = exmo_utils.convert_diff_message_to_order_book_row(diff_message)
+                        d_bids, d_asks = xt_utils.convert_diff_message_to_order_book_row(diff_message)
                         order_book.apply_diffs(d_bids, d_asks, diff_message.update_id)
 
                     self.logger().debug(f"Processed order book snapshot for {trading_pair}.")

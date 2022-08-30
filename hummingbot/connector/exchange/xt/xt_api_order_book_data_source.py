@@ -1,28 +1,29 @@
 #!/usr/bin/env python
-import time
 import asyncio
 import logging
 import aiohttp
+import time
 import ujson
 import websockets
-import hummingbot.connector.exchange.exmo.exmo_constants as CONSTANTS
+import hummingbot.connector.exchange.xt.xt_constants as CONSTANTS
 
 from typing import Optional, List, Dict, Any, AsyncIterable
 from hummingbot.core.data_type.order_book import OrderBook
 from hummingbot.core.data_type.order_book_message import OrderBookMessage
 from hummingbot.core.data_type.order_book_tracker_data_source import OrderBookTrackerDataSource
 from hummingbot.logger import HummingbotLogger
-from hummingbot.connector.exchange.exmo import exmo_utils
-from hummingbot.connector.exchange.exmo.exmo_order_book import ExmoOrderBook
+from hummingbot.connector.exchange.xt import xt_utils
+from hummingbot.connector.exchange.xt.xt_order_book import XtOrderBook
 from hummingbot.core.api_throttler.async_throttler import AsyncThrottler
 
 
-class ExmoAPIOrderBookDataSource(OrderBookTrackerDataSource):
-    MESSAGE_TIMEOUT = 10.0
+class XtAPIOrderBookDataSource(OrderBookTrackerDataSource):
+    MESSAGE_TIMEOUT = 5.0
     SNAPSHOT_TIMEOUT = 60 * 60  # expressed in seconds
-    PING_TIMEOUT = 10.0
+    PING_TIMEOUT = 5.0
 
     _logger: Optional[HummingbotLogger] = None
+    _last_traded_prices: Dict[str, float] = {}
 
     @classmethod
     def logger(cls) -> HummingbotLogger:
@@ -48,27 +49,27 @@ class ExmoAPIOrderBookDataSource(OrderBookTrackerDataSource):
             async with aiohttp.ClientSession() as client:
                 async with client.get(f"{CONSTANTS.REST_URL}/{CONSTANTS.GET_LAST_TRADING_PRICES_PATH_URL}", timeout=10) as response:
                     response_json = await response.json()
-                    for pair, ticker in response_json.items():
-                        t_pair = exmo_utils.convert_from_exchange_trading_pair(pair)
-                        if t_pair in trading_pairs and ticker["last_trade"]:
-                            result[t_pair] = float(ticker["last_trade"])
+                    for trading_pair, ticker in response_json.items():
+                        trading_pair = xt_utils.convert_from_exchange_trading_pair(trading_pair)
+                        if trading_pair in trading_pairs:
+                            result[trading_pair] = float(ticker["price"])
             return result
 
     @staticmethod
     async def fetch_trading_pairs() -> List[str]:
-        throttler = ExmoAPIOrderBookDataSource._get_throttler_instance()
+        throttler = XtAPIOrderBookDataSource._get_throttler_instance()
         async with throttler.execute_task(CONSTANTS.GET_TRADING_PAIRS_PATH_URL):
             async with aiohttp.ClientSession() as client:
                 async with client.get(f"{CONSTANTS.REST_URL}/{CONSTANTS.GET_TRADING_PAIRS_PATH_URL}", timeout=10) as response:
                     if response.status == 200:
-                        from hummingbot.connector.exchange.exmo.exmo_utils import \
+                        from hummingbot.connector.exchange.xt.xt_utils import \
                             convert_from_exchange_trading_pair
                         try:
                             response_json: Dict[str, Any] = await response.json()
-                            return [convert_from_exchange_trading_pair(symbol) for symbol in response_json.keys()]
+                            return [xt_utils.convert_from_exchange_trading_pair(market) for market in response_json.keys()]
                         except Exception:
                             pass
-                            # Do nothing if the request fails -- there will be no autocomplete for exmo trading pairs
+                            # Do nothing if the request fails -- there will be no autocomplete for xt trading pairs
                     return []
 
     @staticmethod
@@ -76,12 +77,12 @@ class ExmoAPIOrderBookDataSource(OrderBookTrackerDataSource):
         """
         Get whole orderbook
         """
-        throttler = ExmoAPIOrderBookDataSource._get_throttler_instance()
+        throttler = XtAPIOrderBookDataSource._get_throttler_instance()
         async with throttler.execute_task(CONSTANTS.GET_ORDER_BOOK_PATH_URL):
             async with aiohttp.ClientSession() as client:
                 async with client.get(
-                    f"{CONSTANTS.REST_URL}/{CONSTANTS.GET_ORDER_BOOK_PATH_URL}?limit=1000&pair="
-                    f"{exmo_utils.convert_to_exchange_trading_pair(trading_pair)}"
+                    f"{CONSTANTS.REST_URL}/{CONSTANTS.GET_ORDER_BOOK_PATH_URL}?market="
+                    f"{xt_utils.convert_to_exchange_trading_pair(trading_pair)}"
                 ) as response:
                     if response.status != 200:
                         raise IOError(
@@ -90,20 +91,19 @@ class ExmoAPIOrderBookDataSource(OrderBookTrackerDataSource):
                         )
 
                     orderbook_data: Dict[str, Any] = await response.json()
-                    orderbook_data = orderbook_data[exmo_utils.convert_to_exchange_trading_pair(trading_pair)]
 
                     return orderbook_data
 
     async def get_new_order_book(self, trading_pair: str) -> OrderBook:
         snapshot: Dict[str, Any] = await self.get_order_book_data(trading_pair)
-        snapshot_timestamp: int = int(time.time() * 1e3)
-        snapshot_msg: OrderBookMessage = ExmoOrderBook.snapshot_message_from_exchange(
+        snapshot_timestamp: int = int(time.time() * 1000)
+        snapshot_msg: OrderBookMessage = XtOrderBook.snapshot_message_from_exchange(
             snapshot,
             snapshot_timestamp,
             metadata={"trading_pair": trading_pair}
         )
         order_book = self.order_book_create_function()
-        bids, asks = exmo_utils.convert_snapshot_message_to_order_book_row(snapshot_msg)
+        bids, asks = xt_utils.convert_snapshot_message_to_order_book_row(snapshot_msg)
         order_book.apply_snapshot(bids, asks, snapshot_msg.update_id)
         return order_book
 
@@ -111,11 +111,24 @@ class ExmoAPIOrderBookDataSource(OrderBookTrackerDataSource):
         try:
             while True:
                 try:
-                    msg: str = await asyncio.wait_for(ws.recv(), timeout=self.MESSAGE_TIMEOUT)
-                    yield msg
+                    raw_msg: str = await asyncio.wait_for(ws.recv(), timeout=self.MESSAGE_TIMEOUT)
+                    msg = xt_utils.decompress_ws_message(msg)
+                    message = ujson.loads(msg)
+                    if "ping" in message:
+                        ping_timestamp = message["ping"]
+                        pong: Dict[str, Any] = {
+                            "pong": ping_timestamp
+                        }
+                        await ws.send(ujson.dumps(pong))
+                    if "pong" in message:
+                        continue
+                    yield message
                 except asyncio.TimeoutError:
-                    pong_waiter = await ws.ping()
-                    await asyncio.wait_for(pong_waiter, timeout=self.PING_TIMEOUT)
+                    ping: Dict[str, Any] = {
+                        "ping": int(time.time())
+                    }
+                    ping_waiter = await ws.send(ujson.dumps(ping))
+                    await asyncio.wait_for(ping_waiter, timeout=self.PING_TIMEOUT)
         except asyncio.TimeoutError:
             self.logger().warning("WebSocket ping timed out. Going to reconnect...")
             return
@@ -129,7 +142,7 @@ class ExmoAPIOrderBookDataSource(OrderBookTrackerDataSource):
         Initialize WebSocket client
         """
         try:
-            ws = await websockets.connect(uri=CONSTANTS.WSS_PUBLIC_URL)
+            ws = await websockets.connect(uri=CONSTANTS.WSS_URL)
             return ws
         except asyncio.CancelledError:
             raise
@@ -148,42 +161,41 @@ class ExmoAPIOrderBookDataSource(OrderBookTrackerDataSource):
         """
         Listen for trades using websocket trade channel
         """
-        while True:
-            try:
-                ws: websockets.WebSocketClientProtocol = await self._create_websocket_connection()
-
-                for trading_pair in self._trading_pairs:
-                    exchange_trading_pair = exmo_utils.convert_to_exchange_trading_pair(trading_pair)
-                    params: Dict[str, Any] = {
-                        "id": 1,
-                        "method": "subscribe",
-                        "topics": [f"spot/trades:{exchange_trading_pair}", f"spot/ticker:{exchange_trading_pair}"]
-                    }
-                    await ws.send(ujson.dumps(params))
-
-                async for raw_msg in self._inner_messages(ws):
-                    message = ujson.loads(raw_msg)
-                    if message is None or "data" not in message:
-                        continue
-
-                    if "event" in message and message["event"] in ["snapshot", "update"]:
-                        if "spot/trades" in message["topic"]:
-                            t_pair = exmo_utils.convert_from_exchange_trading_pair(message["topic"].split(":")[1])
-                            for msg in message["data"]:        # data is a list
-                                msg_timestamp: int = int(msg["date"])
-
-                                trade_msg: OrderBookMessage = ExmoOrderBook.trade_message_from_exchange(
-                                    msg=msg,
-                                    timestamp=msg_timestamp,
-                                    metadata={"trading_pair": t_pair})
-                                output.put_nowait(trade_msg)
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                self.logger().error("Unexpected error.", exc_info=True)
-                await self._sleep(5.0)
-            finally:
-                await ws.close()
+        # while True:
+        #     try:
+        #         ws: websockets.WebSocketClientProtocol = await self._create_websocket_connection()
+        #
+        #         for trading_pair in self._trading_pairs:
+        #             params: Dict[str, Any] = {
+        #                 "op": "subscribe",
+        #                 "args": [f"spot/trade:{xt_utils.convert_to_exchange_trading_pair(trading_pair)}"]
+        #             }
+        #             await ws.send(ujson.dumps(params))
+        #
+        #         async for message in self._inner_messages(ws):
+        #             if message is None:
+        #                continue
+        #            if "data" not in message or message.get("info", None) != "success":
+        #                # Error response
+        #                continue
+        #
+        #             for msg in messages["data"]:        # data is a list
+        #                 msg_timestamp: float = float(msg["s_t"] * 1000)
+        #                 t_pair = xt_utils.convert_from_exchange_trading_pair(msg["symbol"])
+        #
+        #                 trade_msg: OrderBookMessage = XtOrderBook.trade_message_from_exchange(
+        #                     msg=msg,
+        #                     timestamp=msg_timestamp,
+        #                     metadata={"trading_pair": t_pair})
+        #                 output.put_nowait(trade_msg)
+        #     except asyncio.CancelledError:
+        #         raise
+        #     except Exception:
+        #         self.logger().error("Unexpected error.", exc_info=True)
+        #         await self._sleep(5.0)
+        #     finally:
+        #         await ws.close()
+        pass
 
     async def listen_for_order_book_diffs(self, ev_loop: asyncio.BaseEventLoop, output: asyncio.Queue):
         """
@@ -194,29 +206,38 @@ class ExmoAPIOrderBookDataSource(OrderBookTrackerDataSource):
                 ws: websockets.WebSocketClientProtocol = await self._create_websocket_connection()
 
                 for trading_pair in self._trading_pairs:
-                    exchange_trading_pair = exmo_utils.convert_to_exchange_trading_pair(trading_pair)
                     params: Dict[str, Any] = {
-                        "id": 1,
-                        "method": "subscribe",
-                        "topics": [f"spot/order_book_snapshots:{exchange_trading_pair}", f"spot/order_book_updates:{exchange_trading_pair}"]
+                        "channel":  "ex_depth_data",
+                        "market":   f"{xt_utils.convert_to_exchange_trading_pair(trading_pair)}",
+                        "event":    "addChannel"
                     }
                     await ws.send(ujson.dumps(params))
 
-                async for raw_msg in self._inner_messages(ws):
-                    message = ujson.loads(raw_msg)
-                    if message is None or "data" not in message:
+                async for message in self._inner_messages(ws):
+                    if message is None:
+                        continue
+                    if "data" not in message or message.get("info", None) != "success":
+                        # Error response
                         continue
 
-                    if "event" in message and message["event"] in ["snapshot", "update"]:
-                        msg_timestamp: int = int(message["ts"])
-                        t_pair = exmo_utils.convert_from_exchange_trading_pair(message["topic"].split(":")[1])
-                        if "spot/order_book_snapshots" in message["topic"]:
-                            snapshot_msg: OrderBookMessage = ExmoOrderBook.snapshot_message_from_exchange(
-                                msg=message["data"],
-                                timestamp=msg_timestamp,
-                                metadata={"trading_pair": t_pair}
-                            )
-                            output.put_nowait(snapshot_msg)
+                    msg_timestamp: int = int(time.time() * 1000)
+                    trading_pair = lmax_utils.convert_from_exchange_trading_pair(message["data"]["market"])
+                    is_snapshot = message["data"]["isFull"]
+
+                    if is_snapshot:
+                        snapshot_message: OrderBookMessage = XtOrderBook.snapshot_message_from_exchange(
+                            msg=message["data"],
+                            timestamp=msg_timestamp,
+                            metadata={"trading_pair": trading_pair}
+                        )
+                        output.put_nowait(snapshot_message)
+                    else:
+                        diff_message: OrderBookMessage = XtOrderBook.diff_message_from_exchange(
+                            msg=message["data"],
+                            timestamp=msg_timestamp,
+                            metadata={"trading_pair": trading_pair}
+                        )
+                        output.put_nowait(diff_message)
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -239,8 +260,8 @@ class ExmoAPIOrderBookDataSource(OrderBookTrackerDataSource):
             try:
                 for trading_pair in self._trading_pairs:
                     snapshot: Dict[str, any] = await self.get_order_book_data(trading_pair)
-                    snapshot_timestamp: int = int(time.time() * 1e3)
-                    snapshot_msg: OrderBookMessage = ExmoOrderBook.snapshot_message_from_exchange(
+                    snapshot_timestamp: int = int(time.time() * 1000)
+                    snapshot_msg: OrderBookMessage = XtOrderBook.snapshot_message_from_exchange(
                         snapshot,
                         snapshot_timestamp,
                         metadata={"trading_pair": trading_pair}

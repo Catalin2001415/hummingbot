@@ -35,11 +35,11 @@ bittrex_taker_fee:
 kucoin_maker_fee:
 kucoin_taker_fee:
 
+xt_maker_fee:
+xt_taker_fee:
+
 bitmart_maker_fee:
 bitmart_taker_fee:
-
-exmo_maker_fee:
-exmo_taker_fee:
 
 crypto_com_maker_fee:
 crypto_com_taker_fee:

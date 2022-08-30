@@ -95,6 +95,10 @@ okex_api_key = os.getenv("OKEX_API_KEY")
 okex_secret_key = os.getenv("OKEX_SECRET_KEY")
 okex_passphrase = os.getenv("OKEX_PASSPHRASE")
 
+# XT Test
+xt_api_key = os.getenv("XT_API_KEY")
+xt_secret_key = os.getenv("XT_SECRET_KEY")
+
 # BitMart Test
 bitmart_api_key = os.getenv("BITMART_API_KEY")
 bitmart_secret_key = os.getenv("BITMART_SECRET_KEY")

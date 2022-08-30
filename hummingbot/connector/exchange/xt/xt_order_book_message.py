@@ -13,7 +13,7 @@ from hummingbot.core.data_type.order_book_message import (
 )
 
 
-class ExmoOrderBookMessage(OrderBookMessage):
+class XtOrderBookMessage(OrderBookMessage):
     def __new__(
         cls,
         message_type: OrderBookMessageType,
@@ -27,7 +27,7 @@ class ExmoOrderBookMessage(OrderBookMessage):
                 raise ValueError("timestamp must not be None when initializing snapshot messages.")
             timestamp = content["timestamp"]
 
-        return super(ExmoOrderBookMessage, cls).__new__(
+        return super(XtOrderBookMessage, cls).__new__(
             cls, message_type, content, timestamp=timestamp, *args, **kwargs
         )
 
@@ -54,7 +54,7 @@ class ExmoOrderBookMessage(OrderBookMessage):
     @property
     def asks(self) -> List[OrderBookRow]:
         results = [
-            OrderBookRow(float(ask[0]), float(ask[1]), self.update_id) for ask in self.content["ask"]
+            OrderBookRow(float(ask[0]), float(ask[1]), self.update_id) for ask in self.content["asks"]
         ]
         sorted(results, key=lambda a: a.price)
         return results
@@ -62,7 +62,7 @@ class ExmoOrderBookMessage(OrderBookMessage):
     @property
     def bids(self) -> List[OrderBookRow]:
         results = [
-            OrderBookRow(float(bid[0]), float(bid[1]), self.update_id) for bid in self.content["bid"]
+            OrderBookRow(float(bid[0]), float(bid[1]), self.update_id) for bid in self.content["bids"]
         ]
         sorted(results, key=lambda a: a.price)
         return results

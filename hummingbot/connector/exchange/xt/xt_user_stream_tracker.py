@@ -13,21 +13,21 @@ from hummingbot.core.utils.async_utils import (
     safe_ensure_future,
     safe_gather,
 )
-from hummingbot.connector.exchange.exmo.exmo_api_user_stream_data_source import \
-    ExmoAPIUserStreamDataSource
-from hummingbot.connector.exchange.exmo.exmo_auth import ExmoAuth
-from hummingbot.connector.exchange.exmo.exmo_constants import EXCHANGE_NAME
+from hummingbot.connector.exchange.xt.xt_api_user_stream_data_source import \
+    XtAPIUserStreamDataSource
+from hummingbot.connector.exchange.xt.xt_auth import XtAuth
+from hummingbot.connector.exchange.xt.xt_constants import EXCHANGE_NAME
 from hummingbot.core.api_throttler.async_throttler import AsyncThrottler
 
 
-class ExmoUserStreamTracker(UserStreamTracker):
+class XtUserStreamTracker(UserStreamTracker):
 
     def __init__(self,
                  throttler: AsyncThrottler,
-                 exmo_auth: Optional[ExmoAuth] = None,
+                 xt_auth: Optional[XtAuth] = None,
                  trading_pairs: Optional[List[str]] = []):
         super().__init__()
-        self._exmo_auth: ExmoAuth = exmo_auth
+        self._xt_auth: XtAuth = xt_auth
         self._trading_pairs: List[str] = trading_pairs
         self._ev_loop: asyncio.events.AbstractEventLoop = asyncio.get_event_loop()
         self._data_source: Optional[UserStreamTrackerDataSource] = None
@@ -42,9 +42,9 @@ class ExmoUserStreamTracker(UserStreamTracker):
         :return: OrderBookTrackerDataSource
         """
         if not self._data_source:
-            self._data_source = ExmoAPIUserStreamDataSource(
+            self._data_source = XtAPIUserStreamDataSource(
                 throttler=self._throttler,
-                exmo_auth=self._exmo_auth,
+                xt_auth=self._xt_auth,
                 trading_pairs=self._trading_pairs
             )
         return self._data_source
