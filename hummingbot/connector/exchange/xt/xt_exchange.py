@@ -827,15 +827,11 @@ class XtExchange(ExchangeBase):
         :param timeout_seconds: The timeout at which the operation will be canceled.
         :returns List of CancellationResult which indicates whether each order is successfully cancelled.
         """
-        if self._trading_pairs is None:
-            raise Exception("cancel_all can only be used when trading_pairs are specified.")
-        for order in self._in_flight_orders.values():
-            await order.get_exchange_order_id()
-        tracked_orders: Dict[str, XtInFlightOrder] = self._in_flight_orders.copy()
+        tracked_orders: Dict[str, XtInFlightOrder] = self._in_flight_orders.copy().items()
         cancellation_results = []
 
         try:
-            for tracked_order in tracked_orders.values():
+            for tracked_order in self._in_flight_orders.values():
                 response = await self._execute_cancel(tracked_order.trading_pair, tracked_order.client_order_id)
                 await asyncio.sleep(0.2)
 
