@@ -112,8 +112,8 @@ class XtAPIOrderBookDataSource(OrderBookTrackerDataSource):
             while True:
                 try:
                     raw_msg: str = await asyncio.wait_for(ws.recv(), timeout=self.MESSAGE_TIMEOUT)
-                    msg = xt_utils.decompress_ws_message(msg)
-                    message = ujson.loads(msg)
+                    # msg = xt_utils.decompress_ws_message(raw_msg)
+                    message = ujson.loads(raw_msg)
                     if "ping" in message:
                         ping_timestamp = message["ping"]
                         pong: Dict[str, Any] = {
@@ -127,8 +127,7 @@ class XtAPIOrderBookDataSource(OrderBookTrackerDataSource):
                     ping: Dict[str, Any] = {
                         "ping": int(time.time())
                     }
-                    ping_waiter = await ws.send(ujson.dumps(ping))
-                    await asyncio.wait_for(ping_waiter, timeout=self.PING_TIMEOUT)
+                    await ws.send(ujson.dumps(ping))
         except asyncio.TimeoutError:
             self.logger().warning("WebSocket ping timed out. Going to reconnect...")
             return
@@ -221,8 +220,11 @@ class XtAPIOrderBookDataSource(OrderBookTrackerDataSource):
                         continue
 
                     msg_timestamp: int = int(time.time() * 1000)
-                    trading_pair = lmax_utils.convert_from_exchange_trading_pair(message["data"]["market"])
-                    is_snapshot = message["data"]["isFull"]
+                    trading_pair = xt_utils.convert_from_exchange_trading_pair(message["data"]["market"])
+                    if "isFull" in message["data"]:
+                        is_snapshot = message["data"]["isFull"]
+                    else:
+                        is_snapshot = False        # isFull is missing from diff messages
 
                     if is_snapshot:
                         snapshot_message: OrderBookMessage = XtOrderBook.snapshot_message_from_exchange(

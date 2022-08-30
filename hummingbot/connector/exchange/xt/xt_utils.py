@@ -1,5 +1,5 @@
 import math
-import zlib
+import gzip
 from typing import Dict, List, Tuple
 
 from hummingbot.core.utils.tracking_nonce import get_tracking_nonce, get_tracking_nonce_low_res
@@ -97,11 +97,11 @@ class RequestId:
 
 
 def convert_from_exchange_trading_pair(exchange_trading_pair: str) -> str:
-    return exchange_trading_pair.replace("_", "-").upper()
+    return exchange_trading_pair.replace("-", "#").replace("_", "-").upper()
 
 
 def convert_to_exchange_trading_pair(hb_trading_pair: str) -> str:
-    return hb_trading_pair.replace("-", "_").lower()
+    return hb_trading_pair.replace("-", "_").replace("#", "-").lower()
 
 
 def get_new_client_order_id(is_buy: bool, trading_pair: str) -> str:

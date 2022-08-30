@@ -1,6 +1,7 @@
 import aiohttp
 import asyncio
 import copy
+import time
 import json
 import logging
 import math
@@ -130,8 +131,7 @@ class XtExchange(ExchangeBase):
             "order_books_initialized": self._order_book_tracker.ready,
             "account_balance": len(self._account_balances) > 0 if self._trading_required else True,
             "trading_rule_initialized": len(self._trading_rules) > 0,
-            "user_stream_initialized":
-                self._user_stream_tracker.data_source.last_recv_time > 0 if self._trading_required else True,
+            "user_stream_initialized": True,
         }
 
     @property
@@ -265,7 +265,7 @@ class XtExchange(ExchangeBase):
     async def _update_trading_rules(self):
         market_configs = await self._api_request("GET", path_url=CONSTANTS.GET_TRADING_RULES_PATH_URL, is_auth=False)
         self._trading_rules.clear()
-        self._trading_rules = self._format_trading_rules(symbols_details)
+        self._trading_rules = self._format_trading_rules(market_configs)
 
     def _format_trading_rules(self, market_configs: Dict[str, Any]) -> Dict[str, TradingRule]:
         """
@@ -287,7 +287,7 @@ class XtExchange(ExchangeBase):
         }
         """
         result = {}
-        for market, rule in market_configs:
+        for market, rule in market_configs.items():
             try:
                 trading_pair = xt_utils.convert_from_exchange_trading_pair(market)
                 price_decimals = Decimal(str(rule["pricePoint"]))
@@ -301,7 +301,7 @@ class XtExchange(ExchangeBase):
                                                    min_base_amount_increment=base_step,
                                                    min_price_increment=price_step)
             except Exception:
-                self.logger().error(f"Error parsing the trading pair rule {rule}. Skipping.", exc_info=True)
+                self.logger().error(f"Error parsing the trading pair: {trading_pair} with rule: {rule}. Skipping.", exc_info=True)
         return result
 
     async def _api_request(self,
@@ -332,8 +332,7 @@ class XtExchange(ExchangeBase):
             if method == "GET":
                 response = await client.get(url, params=params, headers=headers)
             elif method == "POST":
-                post_json = json.dumps(params)
-                response = await client.post(url, data=post_json, headers=headers)
+                response = await client.post(url, data=params, headers=headers)
             else:
                 raise NotImplementedError
 
@@ -437,8 +436,8 @@ class XtExchange(ExchangeBase):
                                  f"{trading_rule.min_order_size}.")
             params = {
                 "market": xt_utils.convert_to_exchange_trading_pair(trading_pair),
-                "price": float(price),
-                "number": float(amount),
+                "price": f"{price:f}",
+                "number": f"{amount:f}",
                 "type": 1 if trade_type is TradeType.BUY else 0,
                 "entrustType": 0
             }
@@ -608,19 +607,18 @@ class XtExchange(ExchangeBase):
                 raise Exception("_update_order_status can only be used when trading_pairs are specified.")
             for order in self._in_flight_orders.values():
                 await order.get_exchange_order_id()
-            tracked_orders: Dict[str, XtInFlightOrder] = self._in_flight_orders.copy().items()
-            cancellation_results = []
+            tracked_orders: Dict[str, XtInFlightOrder] = self._in_flight_orders.copy()
 
             batch_size = 100
             orders = tracked_orders.values()
             tasks = []
             for trading_pair in self._trading_pairs:
 
-                orders = [order for order in orders if order.trading_pair == trading_pair]
+                tp_orders = [order for order in orders if order.trading_pair == trading_pair]
                 order_chunks = []
 
-                for i in range(0, len(orders), batch_size):
-                    order_chunks.append(orders[i:i+batch_size])
+                for i in range(0, len(tp_orders), batch_size):
+                    order_chunks.append(tp_orders[i:i+batch_size])
 
                 for chunk in order_chunks:
 
@@ -629,7 +627,7 @@ class XtExchange(ExchangeBase):
                     data = base64.b64encode(data.encode('utf-8'))
 
                     params = {
-                        "market": xt_utils.convert_to_exchange_trading_pair(orders[0].trading_pair),
+                        "market": xt_utils.convert_to_exchange_trading_pair(trading_pair),
                         "data": str(data, 'utf-8')
                     }
 
@@ -664,7 +662,7 @@ class XtExchange(ExchangeBase):
 
                 curr_time = int(time.time() * 1000)
                 params = {
-                    "market":       xt_utils.convert_to_exchange_trading_pair(orders[0].trading_pair),
+                    "market":       xt_utils.convert_to_exchange_trading_pair(trading_pair),
                     "startTime":    curr_time - self.TRADE_LOOK_BACK_INTERVAL,
                     "endTime":      curr_time
                 }
@@ -680,7 +678,7 @@ class XtExchange(ExchangeBase):
                     self.logger().info(f"_update_trade_status data not in resp: {response}")
                     continue
                 trades = response["data"]
-                for trade in orders:
+                for trade in trades:
                     await self._process_trade_message_from_trade_status(trade)
 
 
@@ -833,7 +831,7 @@ class XtExchange(ExchangeBase):
             raise Exception("cancel_all can only be used when trading_pairs are specified.")
         for order in self._in_flight_orders.values():
             await order.get_exchange_order_id()
-        tracked_orders: Dict[str, XtInFlightOrder] = self._in_flight_orders.copy().items()
+        tracked_orders: Dict[str, XtInFlightOrder] = self._in_flight_orders.copy()
         cancellation_results = []
 
         try:
@@ -956,7 +954,7 @@ class XtExchange(ExchangeBase):
                 response = await self._api_request("GET", CONSTANTS.GET_OPEN_ORDERS_PATH_URL, params)
                 responses.append(response)
                 count = len(response["data"])
-                if count < page_len:
+                if count < page_size:
                     break
                 else:
                     page += 1
