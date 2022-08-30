@@ -835,28 +835,11 @@ class XtExchange(ExchangeBase):
         cancellation_results = []
 
         try:
-            batch_size = 100
-            orders = tracked_orders.values()
-            for trading_pair in self._trading_pairs:
+            for tracked_order in tracked_orders.values():
+                response = await self._execute_cancel(tracked_order.trading_pair, tracked_order.client_order_id)
+                await asyncio.sleep(0.2)
 
-                orders = [order for order in orders if order.trading_pair == trading_pair]
-                order_chunks = []
-
-                for i in range(0, len(orders), batch_size):
-                    order_chunks.append(orders[i:i+batch_size])
-
-                for chunk in order_chunks:
-
-                    data = [int(order.exchange_order_id) for order in chunk]
-                    data = json.dumps(data)
-                    data = base64.b64encode(data.encode('utf-8'))
-
-                    params = {
-                        "market": xt_utils.convert_to_exchange_trading_pair(orders[0].trading_pair),
-                        "data": str(data, 'utf-8')
-                    }
-
-                    await self._api_request("GET", CONSTANTS.BATCH_CANCEL_ORDER_PATH_URL, params)
+            await asyncio.sleep(5.0)
 
             open_orders = await self.get_open_orders()
             for cl_order_id, tracked_order in tracked_orders:
