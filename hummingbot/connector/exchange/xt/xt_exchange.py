@@ -831,7 +831,8 @@ class XtExchange(ExchangeBase):
         cancellation_results = []
 
         try:
-            for tracked_order in self._in_flight_orders.values():
+            orders = self._in_flight_orders.copy()
+            for tracked_order in orders.values():
                 response = await self._execute_cancel(tracked_order.trading_pair, tracked_order.client_order_id)
                 await asyncio.sleep(0.2)
 
