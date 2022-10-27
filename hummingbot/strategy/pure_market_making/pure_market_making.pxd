@@ -44,6 +44,9 @@ cdef class PureMarketMakingStrategy(StrategyBase):
         list _ping_pong_warning_lines
         bint _hb_app_notification
         object _order_override
+        bint _miner_fill_reversal_enabled
+        object _miner_fill_reversal_order_type
+        object _miner_fill_reversal_spread
 
         double _cancel_timestamp
         double _create_timestamp

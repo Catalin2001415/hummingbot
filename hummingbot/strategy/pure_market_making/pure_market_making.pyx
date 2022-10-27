@@ -84,6 +84,9 @@ cdef class PureMarketMakingStrategy(StrategyBase):
                     split_order_levels_enabled: bool = False,
                     bid_order_level_spreads: List[Decimal] = None,
                     ask_order_level_spreads: List[Decimal] = None,
+                    miner_fill_reversal_enabled: bool = False,
+                    miner_fill_reversal_order_type: str = "limit",
+                    miner_fill_reversal_spread: Decimal = s_decimal_zero,
                     should_wait_order_cancel_confirmation: bool = True,
                     moving_price_band: Optional[MovingPriceBand] = None
                     ):
@@ -130,6 +133,10 @@ cdef class PureMarketMakingStrategy(StrategyBase):
         self._split_order_levels_enabled=split_order_levels_enabled
         self._bid_order_level_spreads=bid_order_level_spreads
         self._ask_order_level_spreads=ask_order_level_spreads
+        self._miner_fill_reversal_enabled=miner_fill_reversal_enabled
+        self._miner_fill_reversal_order_type=miner_fill_reversal_order_type
+        self._miner_fill_reversal_spread=miner_fill_reversal_spread
+        self._miner_fill_reversal_order_ids = set()
         self._cancel_timestamp = 0
         self._create_timestamp = 0
         self._limit_order_type = self._market_info.market.get_maker_order_type()
@@ -448,6 +455,10 @@ cdef class PureMarketMakingStrategy(StrategyBase):
     @property
     def hanging_order_ids(self) -> List[str]:
         return [o.order_id for o in self._hanging_orders_tracker.strategy_current_hanging_orders]
+
+    @property
+    def miner_fill_reversal_order_ids(self) -> List[str]:
+        return list(self._miner_fill_reversal_order_ids)
 
     @property
     def market_info_to_active_orders(self) -> Dict[MarketTradingPairTuple, List[LimitOrder]]:
@@ -1063,6 +1074,8 @@ cdef class PureMarketMakingStrategy(StrategyBase):
 
     cdef c_did_fill_order(self, object order_filled_event):
         cdef:
+            ExchangeBase market = self._market_info.market
+            double expiration_seconds = NaN
             str order_id = order_filled_event.order_id
             object market_info = self._sb_order_tracker.c_get_shadow_market_pair_from_order_id(order_id)
             tuple order_fill_record
@@ -1072,19 +1085,95 @@ cdef class PureMarketMakingStrategy(StrategyBase):
             order_fill_record = (limit_order_record, order_filled_event)
 
             if order_filled_event.trade_type is TradeType.BUY:
-                if self._logging_options & self.OPTION_LOG_MAKER_ORDER_FILLED:
-                    self.log_with_clock(
-                        logging.INFO,
-                        f"({market_info.trading_pair}) Maker buy order of "
-                        f"{order_filled_event.amount} {market_info.base_asset} filled."
-                    )
+
+                # reverse buy fill with sell order of same amount if miner_fill_reversal_enabled
+                if self._miner_fill_reversal_enabled:
+
+                    # if the fill is from a miner fill reversal order, do nothing
+                    if limit_order_record.client_order_id in self.miner_fill_reversal_order_ids:
+                        if self._logging_options & self.OPTION_LOG_MAKER_ORDER_FILLED:
+                            self.log_with_clock(
+                                logging.INFO,
+                                f"Miner Fill Reversal Order: ({market_info.trading_pair}) Maker buy order of "
+                                f"{order_filled_event.amount} {market_info.base_asset} filled."
+                            )
+                    else:
+                        # place a miner fill reversal order
+                        price = Decimal(str(order_filled_event.price)) * (Decimal("1") + self._miner_fill_reversal_spread)
+                        price = market.c_quantize_order_price(self.trading_pair, price)
+                        size = Decimal(str(order_filled_event.amount))
+                        size = market.c_quantize_order_amount(self.trading_pair, size)
+
+                        ask_order_id = self.c_sell_with_specific_market(
+                            self._market_info,
+                            size,
+                            order_type=self._limit_order_type,
+                            price=price,
+                            expiration_seconds=expiration_seconds
+                        )
+                        order = next((o for o in self.active_orders if o.client_order_id == ask_order_id))
+                        if order:
+                            self._miner_fill_reversal_order_ids.add(ask_order_id)
+
+                        if self._logging_options & self.OPTION_LOG_MAKER_ORDER_FILLED:
+                            self.log_with_clock(
+                                logging.INFO,
+                                f"({market_info.trading_pair}) Maker buy order of "
+                                f"{order_filled_event.amount} {market_info.base_asset} filled."
+                            )
+
+                else:
+                    if self._logging_options & self.OPTION_LOG_MAKER_ORDER_FILLED:
+                        self.log_with_clock(
+                            logging.INFO,
+                            f"({market_info.trading_pair}) Maker buy order of "
+                            f"{order_filled_event.amount} {market_info.base_asset} filled."
+                        )
             else:
-                if self._logging_options & self.OPTION_LOG_MAKER_ORDER_FILLED:
-                    self.log_with_clock(
-                        logging.INFO,
-                        f"({market_info.trading_pair}) Maker sell order of "
-                        f"{order_filled_event.amount} {market_info.base_asset} filled."
-                    )
+
+                # reverse sell fill with buy order of same amount if miner_fill_reversal_enabled
+                if self._miner_fill_reversal_enabled:
+
+                    # if the fill is from a miner fill reversal order, do nothing
+                    if limit_order_record.client_order_id in self.miner_fill_reversal_order_ids:
+                        if self._logging_options & self.OPTION_LOG_MAKER_ORDER_FILLED:
+                            self.log_with_clock(
+                                logging.INFO,
+                                f"Miner Fill Reversal Order: ({market_info.trading_pair}) Maker sell order of "
+                                f"{order_filled_event.amount} {market_info.base_asset} filled."
+                            )
+                    else:
+                        # place a miner fill reversal order
+                        price = Decimal(str(order_filled_event.price)) * (Decimal("1") - self._miner_fill_reversal_spread)
+                        price = market.c_quantize_order_price(self.trading_pair, price)
+                        size = Decimal(str(order_filled_event.amount))
+                        size = market.c_quantize_order_amount(self.trading_pair, size)
+
+                        bid_order_id = self.c_buy_with_specific_market(
+                            self._market_info,
+                            size,
+                            order_type=self._limit_order_type,
+                            price=price,
+                            expiration_seconds=expiration_seconds
+                        )
+                        order = next((o for o in self.active_orders if o.client_order_id == bid_order_id))
+                        if order:
+                            self._miner_fill_reversal_order_ids.add(bid_order_id)
+
+                        if self._logging_options & self.OPTION_LOG_MAKER_ORDER_FILLED:
+                            self.log_with_clock(
+                                logging.INFO,
+                                f"({market_info.trading_pair}) Maker sell order of "
+                                f"{order_filled_event.amount} {market_info.base_asset} filled."
+                            )
+
+                else:
+                    if self._logging_options & self.OPTION_LOG_MAKER_ORDER_FILLED:
+                        self.log_with_clock(
+                            logging.INFO,
+                            f"({market_info.trading_pair}) Maker sell order of "
+                            f"{order_filled_event.amount} {market_info.base_asset} filled."
+                        )
 
             if self._inventory_cost_price_delegate is not None:
                 self._inventory_cost_price_delegate.process_order_fill_event(order_filled_event)
@@ -1108,6 +1197,22 @@ cdef class PureMarketMakingStrategy(StrategyBase):
                 )
                 self.notify_hb_app_with_timestamp(
                     f"Hanging maker BUY order {limit_order_record.quantity} {limit_order_record.base_currency} @ "
+                    f"{limit_order_record.price} {limit_order_record.quote_currency} is filled."
+                )
+                return
+
+        if self._miner_fill_reversal_enabled:
+            # If the filled order is a miner fill reversal order, do nothing
+            if limit_order_record.client_order_id in self.miner_fill_reversal_order_ids:
+                self._miner_fill_reversal_order_ids.remove(limit_order_record.client_order_id)
+                self.log_with_clock(
+                    logging.INFO,
+                    f"({self.trading_pair}) Miner Fill Reversal maker buy order {order_id} "
+                    f"({limit_order_record.quantity} {limit_order_record.base_currency} @ "
+                    f"{limit_order_record.price} {limit_order_record.quote_currency}) has been completely filled."
+                )
+                self.notify_hb_app_with_timestamp(
+                    f"Miner Fill Reversal maker BUY order {limit_order_record.quantity} {limit_order_record.base_currency} @ "
                     f"{limit_order_record.price} {limit_order_record.quote_currency} is filled."
                 )
                 return
@@ -1137,6 +1242,7 @@ cdef class PureMarketMakingStrategy(StrategyBase):
         if limit_order_record is None:
             return
         active_buy_ids = [x.client_order_id for x in self.active_orders if x.is_buy]
+
         if self._hanging_orders_enabled:
             # If the filled order is a hanging order, do nothing
             if order_id in self.hanging_order_ids:
@@ -1148,6 +1254,22 @@ cdef class PureMarketMakingStrategy(StrategyBase):
                 )
                 self.notify_hb_app_with_timestamp(
                     f"Hanging maker SELL order {limit_order_record.quantity} {limit_order_record.base_currency} @ "
+                    f"{limit_order_record.price} {limit_order_record.quote_currency} is filled."
+                )
+                return
+
+        if self._miner_fill_reversal_enabled:
+            # If the filled order is a miner fill reversal order, do nothing
+            if limit_order_record.client_order_id in self.miner_fill_reversal_order_ids:
+                self._miner_fill_reversal_order_ids.remove(limit_order_record.client_order_id)
+                self.log_with_clock(
+                    logging.INFO,
+                    f"({self.trading_pair}) Miner Fill Reversal maker sell order {order_id} "
+                    f"({limit_order_record.quantity} {limit_order_record.base_currency} @ "
+                    f"{limit_order_record.price} {limit_order_record.quote_currency}) has been completely filled."
+                )
+                self.notify_hb_app_with_timestamp(
+                    f"Miner Fill Reversal maker SELL order {limit_order_record.quantity} {limit_order_record.base_currency} @ "
                     f"{limit_order_record.price} {limit_order_record.quote_currency} is filled."
                 )
                 return
@@ -1183,10 +1305,12 @@ cdef class PureMarketMakingStrategy(StrategyBase):
 
     cdef c_cancel_active_orders_on_max_age_limit(self):
         """
-        Cancels active non hanging orders if they are older than max age limit
+        Cancels active non hanging, non miner fill reversal orders if they are older than max age limit
         """
         cdef:
             list active_orders = self.active_non_hanging_orders
+        active_orders = [order for order in active_orders
+                      if order.client_order_id not in self.miner_fill_reversal_order_ids]
 
         if active_orders and any(order_age(o, self._current_timestamp) > self._max_order_age for o in active_orders):
             for order in active_orders:
@@ -1194,7 +1318,7 @@ cdef class PureMarketMakingStrategy(StrategyBase):
 
     cdef c_cancel_active_orders(self, object proposal):
         """
-        Cancels active non hanging orders, checks if the order prices are within tolerance threshold
+        Cancels active non hanging, non miner fill reversal orders, checks if the order prices are within tolerance threshold
         """
         if self._cancel_timestamp > self._current_timestamp:
             return
@@ -1204,6 +1328,8 @@ cdef class PureMarketMakingStrategy(StrategyBase):
             list active_buy_prices = []
             list active_sells = []
             bint to_defer_canceling = False
+        active_orders = [order for order in active_orders
+                      if order.client_order_id not in self.miner_fill_reversal_order_ids]
         if len(active_orders) == 0:
             return
         if proposal is not None and \
@@ -1220,20 +1346,25 @@ cdef class PureMarketMakingStrategy(StrategyBase):
 
         if not to_defer_canceling:
             self._hanging_orders_tracker.update_strategy_orders_with_equivalent_orders()
-            for order in self.active_non_hanging_orders:
+            active_orders = self.active_non_hanging_orders
+            active_orders = [order for order in active_orders
+                          if order.client_order_id not in self.miner_fill_reversal_order_ids]
+            for order in active_orders:
                 # If is about to be added to hanging_orders then don't cancel
                 if not self._hanging_orders_tracker.is_potential_hanging_order(order):
                     self.c_cancel_order(self._market_info, order.client_order_id)
         # else:
         #     self.set_timers()
 
-    # Cancel Non-Hanging, Active Orders if Spreads are below minimum_spread
+    # Cancel Non-Hanging Non-Miner Fill Reversal, Active Orders if Spreads are below minimum_spread
     cdef c_cancel_orders_below_min_spread(self):
         cdef:
             list active_orders = self.market_info_to_active_orders.get(self._market_info, [])
             object price = self.get_price()
         active_orders = [order for order in active_orders
                          if order.client_order_id not in self.hanging_order_ids]
+        active_orders = [order for order in active_orders
+                      if order.client_order_id not in self.miner_fill_reversal_order_ids]
         for order in active_orders:
             negation = -1 if order.is_buy else 1
             if (negation * (order.price - price) / price) < self._minimum_spread:
@@ -1243,7 +1374,11 @@ cdef class PureMarketMakingStrategy(StrategyBase):
                 self.c_cancel_order(self._market_info, order.client_order_id)
 
     cdef bint c_to_create_orders(self, object proposal):
-        non_hanging_orders_non_cancelled = [o for o in self.active_non_hanging_orders if not
+        cdef:
+            list active_orders = self.active_non_hanging_orders
+        active_orders = [order for order in active_orders
+                      if order.client_order_id not in self.miner_fill_reversal_order_ids]
+        non_hanging_orders_non_cancelled = [o for o in active_orders if not
                                             self._hanging_orders_tracker.is_potential_hanging_order(o)]
         return (self._create_timestamp < self._current_timestamp
                 and (not self._should_wait_order_cancel_confirmation or

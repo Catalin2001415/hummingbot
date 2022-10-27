@@ -69,6 +69,9 @@ def start(self):
             c_map.get("bid_order_level_amounts").value)
         ask_order_level_amounts = convert_decimal_string_to_list(
             c_map.get("ask_order_level_amounts").value)
+        miner_fill_reversal_enabled = c_map.get("miner_fill_reversal_enabled").value
+        miner_fill_reversal_order_type = c_map.get("miner_fill_reversal_order_type").value
+        miner_fill_reversal_spread = c_map.get("miner_fill_reversal_spread").value / Decimal('100')
         if split_order_levels_enabled:
             buy_list = [['buy', spread, amount] for spread, amount in zip(bid_order_level_spreads, bid_order_level_amounts)]
             sell_list = [['sell', spread, amount] for spread, amount in zip(ask_order_level_spreads, ask_order_level_amounts)]
@@ -139,7 +142,10 @@ def start(self):
             bid_order_level_spreads=bid_order_level_spreads,
             ask_order_level_spreads=ask_order_level_spreads,
             should_wait_order_cancel_confirmation=should_wait_order_cancel_confirmation,
-            moving_price_band=moving_price_band
+            moving_price_band=moving_price_band,
+            miner_fill_reversal_enabled=miner_fill_reversal_enabled,
+            miner_fill_reversal_order_type=miner_fill_reversal_order_type,
+            miner_fill_reversal_spread=miner_fill_reversal_spread
         )
     except Exception as e:
         self.notify(str(e))

@@ -97,6 +97,17 @@ def validate_price_type(value: str) -> Optional[str]:
     return error
 
 
+def validate_miner_fill_reversal_order_type(value: str) -> Optional[str]:
+    error = None
+
+    valid_values = {"limit",
+                    "market",
+                    }
+    if value not in valid_values:
+        error = "Invalid miner fill reversal order type."
+    return error
+
+
 def on_validated_price_type(value: str):
     if value == 'inventory_cost':
         pure_market_making_config_map["inventory_price"].value = None
@@ -445,4 +456,29 @@ pure_market_making_config_map = {
                       "split_order_levels_enabled").value,
                   type_str="str",
                   validator=validate_decimal_list),
+    "miner_fill_reversal_enabled":
+        ConfigVar(key="miner_fill_reversal_enabled",
+                  prompt="Would you like to reverse a trade when it fills? Buy -> Sell; Sell -> Buy (Yes/No) >>> ",
+                  type_str="bool",
+                  default=False,
+                  validator=validate_bool,
+                  prompt_on_new=False),
+    "miner_fill_reversal_order_type":
+        ConfigVar(key="miner_fill_reversal_spread",
+                  prompt="What order type should the miner fill reversal orders be? (limit or market) >>> ",
+                  type_str="str",
+                  default="limit",
+                  required_if=lambda: False,
+                  validator=validate_miner_fill_reversal_order_type),
+                  prompt_on_new=False),
+    "miner_fill_reversal_spread":
+        ConfigVar(key="miner_fill_reversal_spread",
+                  prompt="How far away from the filled price do you want to place the "
+                         "miner fill reversal order? (Enter 1 to indicate 1%) >>> ",
+                  type_str="decimal",
+                  default=Decimal("0"),
+                  required_if=lambda: pure_market_making_config_map.get(
+                      "miner_fill_reversal_enabled").value,
+                  validator=lambda v: validate_decimal(v, 0, 100, inclusive=True),
+                  prompt_on_new=False),
 }
