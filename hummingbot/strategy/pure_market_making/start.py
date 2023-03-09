@@ -51,6 +51,8 @@ def start(self):
         price_source_exchange = c_map.get("price_source_exchange").value
         price_source_market = c_map.get("price_source_market").value
         price_source_custom_api = c_map.get("price_source_custom_api").value
+        active_orders_price_cancellation_enabled = c_map.get("active_orders_price_cancellation_enabled").value
+        active_orders_price_cancel_pct = c_map.get("active_orders_price_cancel_pct").value / Decimal('100')
         custom_api_update_interval = c_map.get("custom_api_update_interval").value
         order_refresh_tolerance_pct = c_map.get("order_refresh_tolerance_pct").value / Decimal('100')
         order_override = c_map.get("order_override").value
@@ -125,6 +127,8 @@ def start(self):
             asset_price_delegate=asset_price_delegate,
             inventory_cost_price_delegate=inventory_cost_price_delegate,
             price_type=price_type,
+            active_orders_price_cancellation_enabled=active_orders_price_cancellation_enabled,
+            active_orders_price_cancel_pct=active_orders_price_cancel_pct,
             take_if_crossed=take_if_crossed,
             price_ceiling=price_ceiling,
             price_floor=price_floor,

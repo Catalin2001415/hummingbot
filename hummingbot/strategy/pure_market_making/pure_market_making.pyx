@@ -72,6 +72,8 @@ cdef class PureMarketMakingStrategy(StrategyBase):
                     asset_price_delegate: AssetPriceDelegate = None,
                     inventory_cost_price_delegate: InventoryCostPriceDelegate = None,
                     price_type: str = "mid_price",
+                    active_orders_price_cancellation_enabled: bool = False,
+                    active_orders_price_cancel_pct: Decimal = Decimal("0.1"),
                     take_if_crossed: bool = False,
                     price_ceiling: Decimal = s_decimal_neg_one,
                     price_floor: Decimal = s_decimal_neg_one,
@@ -120,6 +122,8 @@ cdef class PureMarketMakingStrategy(StrategyBase):
         self._asset_price_delegate = asset_price_delegate
         self._inventory_cost_price_delegate = inventory_cost_price_delegate
         self._price_type = self.get_price_type(price_type)
+        self._active_orders_price_cancellation_enabled = active_orders_price_cancellation_enabled
+        self._active_orders_price_cancel_pct = active_orders_price_cancel_pct
         self._take_if_crossed = take_if_crossed
         self._price_ceiling = price_ceiling
         self._price_floor = price_floor
@@ -274,6 +278,22 @@ cdef class PureMarketMakingStrategy(StrategyBase):
     @hanging_orders_cancel_pct.setter
     def hanging_orders_cancel_pct(self, value: Decimal):
         self._hanging_orders_tracker._hanging_orders_cancel_pct = value
+
+    @property
+    def active_orders_price_cancellation_enabled(self) -> bool:
+        return self._active_orders_price_cancel_pct
+
+    @active_orders_price_cancellation_enabled.setter
+    def active_orders_price_cancellation_enabled(self, value: bool):
+        self._active_orders_price_cancellation_enabled = value
+
+    @property
+    def active_orders_price_cancel_pct(self) -> Decimal:
+        return self._active_orders_price_cancel_pct
+
+    @active_orders_price_cancel_pct.setter
+    def active_orders_price_cancel_pct(self, value: Decimal):
+        self._active_orders_price_cancel_pct = value
 
     @property
     def bid_spread(self) -> Decimal:
@@ -754,6 +774,8 @@ cdef class PureMarketMakingStrategy(StrategyBase):
 
             self._hanging_orders_tracker.process_tick()
 
+            if self._active_orders_price_cancellation_enabled:
+                self.c_cancel_active_orders_on_price_pct()
             self.c_cancel_active_orders_on_max_age_limit()
             self.c_cancel_active_orders(proposal)
             self.c_cancel_orders_below_min_spread()
@@ -1172,6 +1194,31 @@ cdef class PureMarketMakingStrategy(StrategyBase):
             if abs(proposal - current)/current > self._order_refresh_tolerance_pct:
                 return False
         return True
+
+    cdef c_cancel_active_orders_on_price_pct(self):
+        """
+        Cancels active non hanging orders if they within active_orders_price_cancel_pct
+
+        Removes active non hanging orders with prices that have surpassed
+        the cancelation percent.
+
+        This method should be called on each clock tick.
+        """
+        cdef:
+            list active_orders = self.active_non_hanging_orders
+
+        current_price = self.get_price()
+        for order in active_orders:
+            if abs(order.price - current_price) / current_price < self._active_orders_price_cancel_pct:
+                self.logger().info(
+                    f"Cancelling the active order {order.client_order_id} as it crossed the min distance of {self._active_orders_price_cancel_pct * 100}%, "
+                    f"from Order Price: {order.price} and Current Price: {current_price}"
+                )
+                self.notify_hb_app_with_timestamp(
+                    f"Cancelling the active order {order.client_order_id} as it crossed the min distance of {self._active_orders_price_cancel_pct * 100}%, "
+                    f"from Order Price: {order.price} and Current Price: {current_price}"
+                )
+                self.c_cancel_order(self._market_info, order.client_order_id)
 
     cdef c_cancel_active_orders_on_max_age_limit(self):
         """

@@ -360,6 +360,20 @@ pure_market_making_config_map = {
                   required_if=lambda: pure_market_making_config_map.get("price_source").value == "external_market",
                   type_str="str",
                   validator=validate_price_source_market),
+    "active_orders_price_cancellation_enabled":
+        ConfigVar(key="active_orders_price_cancellation_enabled",
+                  prompt="Do you want to enable active orders cancellation triggered on price movement? (Yes/No) >>> ",
+                  type_str="bool",
+                  default=False,
+                  validator=validate_bool),
+    "active_orders_price_cancel_pct":
+        ConfigVar(key="active_orders_price_cancel_pct",
+                  prompt="At what spread percentage away from the current price(strategy price type) will active orders be canceled? "
+                         "(Enter 1 to indicate 1%) >>> ",
+                  required_if=lambda: pure_market_making_config_map.get("active_orders_price_cancellation_enabled").value,
+                  type_str="decimal",
+                  default=Decimal("0"),
+                  validator=lambda v: validate_decimal(v, 0, 100, inclusive=True)),
     "take_if_crossed":
         ConfigVar(key="take_if_crossed",
                   prompt="Do you want to take the best order if orders cross the orderbook? ((Yes/No) >>> ",

@@ -37,6 +37,8 @@ cdef class PureMarketMakingStrategy(StrategyBase):
         object _asset_price_delegate
         object _inventory_cost_price_delegate
         object _price_type
+        bint _active_orders_price_cancellation_enabled
+        object _active_orders_price_cancel_pct
         bint _take_if_crossed
         object _price_ceiling
         object _price_floor
@@ -76,6 +78,7 @@ cdef class PureMarketMakingStrategy(StrategyBase):
     cdef bint c_is_within_tolerance(self, list current_prices, list proposal_prices)
     cdef c_cancel_active_orders(self, object proposal)
     cdef c_cancel_orders_below_min_spread(self)
+    cdef c_cancel_active_orders_on_price_pct(self)
     cdef c_cancel_active_orders_on_max_age_limit(self)
     cdef bint c_to_create_orders(self, object proposal)
     cdef c_execute_orders_proposal(self, object proposal)

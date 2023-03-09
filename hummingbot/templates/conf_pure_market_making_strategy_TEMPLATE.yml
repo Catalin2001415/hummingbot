@@ -118,6 +118,11 @@ price_source_exchange: null
 # A trading pair for the external exchange, e.g. BTC-USDT (for external exchange pricing source).
 price_source_market: null
 
+# Whether to cancel active orders if they are within the given spread percentage.
+active_orders_price_cancellation_enabled: null
+# Spread from current price below which active orders are cancelled.
+active_orders_price_cancel_pct: null
+
 # An external api that returns price (for custom_api pricing source).
 price_source_custom_api: null
 
