@@ -242,8 +242,8 @@ class PMMPriceSource(StrategyV2Base):
             executors=all_executors,
             filter_func=lambda x: x.side == TradeType.SELL and x.type == "position_executor" and x.is_active)
 
-        for connector_name in self.connectors:
-            for trading_pair in self.market_data_provider.get_trading_pairs(connector_name):
+        for connector_name in self.config.markets.keys():
+            for trading_pair in self.config.markets.get(connector_name, []):
                 # Get the reference price from the price aggregator
                 price_type = self.get_price_type_from_config(self.config.price_source_type)
                 referece_price = self.price_aggregator[trading_pair].get_price(price_type)
