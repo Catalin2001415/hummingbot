@@ -38,6 +38,15 @@ class XtAPIUserStreamDataSource(UserStreamTrackerDataSource):
         output queue
         :param output: the queue to use to store the received messages
         """
+        async def send_ping_periodically(ws_assistant):
+            while True:
+                try:
+                    await ws_assistant.ping()  # Send a ping every WS_HEARTBEAT_TIME_INTERVAL seconds
+                    await asyncio.sleep(CONSTANTS.WS_HEARTBEAT_TIME_INTERVAL)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    self.logger().exception(f"Error in pinging: {e}")
         while True:
             try:
                 self._ws_assistant = await self._connected_websocket_assistant()
@@ -47,6 +56,10 @@ class XtAPIUserStreamDataSource(UserStreamTrackerDataSource):
                 await self._subscribe_channels(websocket_assistant=self._ws_assistant)
                 self.logger().info("Subscribed to private account and orders channels...")
                 await self._ws_assistant.ping()  # to update last_recv_timestamp
+
+                # Create a task to send pings periodically
+                ping_task = asyncio.create_task(send_ping_periodically(self._ws_assistant))
+
                 await self._process_websocket_messages(websocket_assistant=self._ws_assistant, queue=output)
             except asyncio.CancelledError:
                 raise
@@ -55,6 +68,9 @@ class XtAPIUserStreamDataSource(UserStreamTrackerDataSource):
                 self.logger().exception("Unexpected error while listening to user stream. Retrying after 5 seconds...")
                 await self._sleep(1.0)
             finally:
+                if ping_task:
+                    ping_task.cancel()  # Cancel the ping task when exiting
+
                 await self._on_user_stream_interruption(websocket_assistant=self._ws_assistant)
                 self._ws_assistant = None
 
@@ -92,7 +108,6 @@ class XtAPIUserStreamDataSource(UserStreamTrackerDataSource):
     async def _process_websocket_messages(self, websocket_assistant: WSAssistant, queue: asyncio.Queue):
         async for ws_response in websocket_assistant.iter_messages():
             data = ws_response.data
-            # print("data", data)
             await self._process_event_message(event_message=data, queue=queue)
 
     async def _process_event_message(self, event_message: Dict[str, Any], queue: asyncio.Queue):

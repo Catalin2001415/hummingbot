@@ -66,10 +66,24 @@ class XtAPIOrderBookDataSource(OrderBookTrackerDataSource):
         exchange. Each message is stored in its own queue.
         """
         ws: Optional[WSAssistant] = None
+
+        async def send_ping_periodically(ws_assistant):
+            while True:
+                try:
+                    await ws_assistant.ping()  # Send a ping every WS_HEARTBEAT_TIME_INTERVAL seconds
+                    await asyncio.sleep(CONSTANTS.WS_HEARTBEAT_TIME_INTERVAL)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    self.logger().exception(f"Error in pinging: {e}")
         while True:
             try:
                 ws: WSAssistant = await self._connected_websocket_assistant()
                 await self._subscribe_channels(ws)
+
+                # Create a task to send pings periodically
+                ping_task = asyncio.create_task(send_ping_periodically(self._ws_assistant))
+
                 await self._process_websocket_messages(websocket_assistant=ws)
             except asyncio.CancelledError:
                 raise
@@ -79,6 +93,9 @@ class XtAPIOrderBookDataSource(OrderBookTrackerDataSource):
                 )
                 await self._sleep(1.0)
             finally:
+                if ping_task:
+                    ping_task.cancel()  # Cancel the ping task when exiting
+
                 ws and await ws.disconnect()
 
     async def _subscribe_channels(self, ws: WSAssistant):

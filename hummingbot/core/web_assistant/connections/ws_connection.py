@@ -52,7 +52,7 @@ class WSConnection:
         await request.send_with_connection(connection=self)
 
     async def ping(self):
-        await self._connection.ping()
+        await self._connection.send_str("ping")
 
     async def receive(self) -> Optional[WSResponse]:
         self._ensure_connected()
