@@ -1,11 +1,8 @@
-from typing import (
-    Optional,
-    Dict,
-    Any
-)
 import base64
 import hashlib
 import hmac
+from typing import Any, Dict, Optional
+
 from hummingbot.connector.exchange.kraken.kraken_tracking_nonce import get_tracking_nonce
 
 

@@ -193,6 +193,8 @@ class XtExchange(ExchangePyBase):
             data=api_params,
             is_auth_required=True)
 
+        # print("first print", CONSTANTS.ORDER_PATH_URL, api_params)
+        # print("order_result", order_result)
         if "result" not in order_result or order_result["result"] is None:
             raise
 
@@ -366,7 +368,7 @@ class XtExchange(ExchangePyBase):
 
                         order_update = OrderUpdate(
                             trading_pair=tracked_order.trading_pair,
-                            update_timestamp=order_update["t"] * 1e-3,
+                            update_timestamp=order_update["ct"] * 1e-3,
                             new_state=CONSTANTS.ORDER_STATE[order_update["st"]],
                             client_order_id=tracked_order.client_order_id,
                             exchange_order_id=str(order_update["i"]),
@@ -392,7 +394,9 @@ class XtExchange(ExchangePyBase):
         orders_to_update = self.in_flight_orders.copy()
         for client_order_id, order in orders_to_update.items():
             try:
+                # print("order", order)
                 order_update = await self._request_order_status(tracked_order=order)
+                # print("order_update", order_update)
                 if client_order_id in self.in_flight_orders and order_update is not None:
                     self._order_tracker.process_order_update(order_update)
             except asyncio.CancelledError:
@@ -404,6 +408,7 @@ class XtExchange(ExchangePyBase):
                 )
                 await self._order_tracker.process_order_not_found(client_order_id)
             except Exception as request_error:
+                # print(request_error)
                 self.logger().network(
                     f"Error fetching status update for the order {order.client_order_id}: {request_error}.",
                     app_warning_msg=f"Failed to fetch status update for the order {order.client_order_id}.",
@@ -478,11 +483,13 @@ class XtExchange(ExchangePyBase):
         if new_state == OrderState.CANCELED:
             await self._cancelled_order_handler(client_order_id, updated_order_data)
 
+        # print("updated_order_data", updated_order_data)
         order_update = OrderUpdate(
             client_order_id=tracked_order.client_order_id,
             exchange_order_id=str(updated_order_data["orderId"]),
             trading_pair=tracked_order.trading_pair,
-            update_timestamp=updated_order_data["updatedTime"] * 1e-3,
+            # update_timestamp=updated_order_data["updatedTime"] * 1e-3,
+            update_timestamp=updated_order_data["time"] * 1e-3,
             new_state=new_state,
         )
 

@@ -1,8 +1,8 @@
-import hmac
 import hashlib
+import hmac
 import time
 from base64 import b64encode
-from typing import Dict, Any
+from typing import Any, Dict
 
 
 class HitbtcAuth():

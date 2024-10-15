@@ -51,6 +51,7 @@ class XtAPIUserStreamDataSource(UserStreamTrackerDataSource):
             except asyncio.CancelledError:
                 raise
             except Exception:
+                print(Exception)
                 self.logger().exception("Unexpected error while listening to user stream. Retrying after 5 seconds...")
                 await self._sleep(1.0)
             finally:
@@ -91,6 +92,7 @@ class XtAPIUserStreamDataSource(UserStreamTrackerDataSource):
     async def _process_websocket_messages(self, websocket_assistant: WSAssistant, queue: asyncio.Queue):
         async for ws_response in websocket_assistant.iter_messages():
             data = ws_response.data
+            # print("data", data)
             await self._process_event_message(event_message=data, queue=queue)
 
     async def _process_event_message(self, event_message: Dict[str, Any], queue: asyncio.Queue):
